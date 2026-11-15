@@ -100,19 +100,37 @@ pass it to `factory-job run-start --models <file>`.
 
 ## Running unattended
 
-Inside the Dev Container, start Claude Code so nothing prompts mid-run:
+Inside the Dev Container, run Claude Code in **auto mode**:
 
 ```
-claude --permission-mode bypassPermissions
+claude --permission-mode auto
 ```
 
-`bypassPermissions` (or `--dangerously-skip-permissions`) is meant for
-isolated containers only, and must run as a non-root user. It can't be set
-from project settings; pass the flag, or set
-`"permissions": {"defaultMode": "bypassPermissions"}` in the container's
-`~/.claude/settings.json`. Outside a container, the guard script refuses to
-run jobs unless the operator opts out (`factory-job config set allow_host
-true`). In that case prefer an allowlist over bypassing permissions.
+In auto mode a classifier reviews each action, so routine work runs without
+prompts while risky actions are still stopped. It can't be set from project
+settings: pass the flag, or set `"permissions": {"defaultMode": "auto"}` in
+the container's `~/.claude/settings.json`.
+
+**When something is blocked.** A denied action fails that tool call. The agent
+may work around it, or the job ends up retried, escalated or parked. Don't
+loosen permissions wholesale. Tune them:
+
+1. Find the blocked action, from the prompt, the agent's error, or the job's
+   history (`factory-job status`, or the board).
+2. If the factory legitimately needs it every time, add a narrow rule to
+   `permissions.allow` in the container's `~/.claude/settings.json`, for
+   example `Bash(git -C * push *)`. Rules match the command text, so the
+   guard script's absolute path needs its own rule. If an action should never
+   happen, add it to `permissions.deny`.
+3. Run again, and repeat until runs complete without interruptions.
+
+`bypassPermissions` (`--dangerously-skip-permissions`) removes every check.
+Use it only as a last resort, in a fully isolated, disposable container, as
+a non-root user.
+
+Outside a container, the guard script refuses to run jobs unless the operator
+opts out (`factory-job config set allow_host true`). There, keep auto mode or
+an explicit allowlist, and never bypass permissions.
 
 ## Statusline
 
