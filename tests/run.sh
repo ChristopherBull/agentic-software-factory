@@ -137,6 +137,20 @@ test_adopt_refuses_without_a_github_remote() {
   contains "$out" "needs a GitHub remote"
 }
 
+test_dogfooding_protects_the_guard_and_sandbox() {
+  mkdir -p bin .claude-plugin .devcontainer
+  printf '#!/usr/bin/env bash\n' >bin/factory-job && chmod +x bin/factory-job
+  printf '{"name": "factory"}\n' >.claude-plugin/plugin.json
+  printf '{}\n' >.devcontainer/devcontainer.json
+  git add -A && git commit -qm "chore: look like the factory" && git push -q
+  adopt
+  local p
+  p="$(fj config get protected_paths)"
+  contains "$p" '"bin/factory-job"'
+  contains "$p" '".claude-plugin/*"'
+  contains "$p" '".devcontainer/*"'
+}
+
 test_plan_limits() {
   fj adopt --plan pro | grep -q '"max_parallel_jobs": 2'
   fj adopt --plan ultra | grep -q '"max_parallel_jobs": 4'

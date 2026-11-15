@@ -755,6 +755,13 @@ detect_protected() {
     [[ -f $d/$f ]] && out="$(jq --arg f "$f" '. + [$f]' <<<"$out")"
   done
   [[ -d $d/tests ]] && [[ -x $d/tests/run.sh ]] && out="$(jq '. + ["tests/run.sh"]' <<<"$out")"
+  # The sandbox's own config shouldn't change without a person seeing it.
+  [[ -d $d/.devcontainer ]] && out="$(jq '. + [".devcontainer/*"]' <<<"$out")"
+  # When the factory works on itself, protect the guard script that enforces
+  # every rule, and the plugin manifests.
+  if [[ -x $d/bin/factory-job ]] && jq -e '.name == "factory"' "$d/.claude-plugin/plugin.json" >/dev/null 2>&1; then
+    out="$(jq '. + ["bin/factory-job", ".claude-plugin/*"]' <<<"$out")"
+  fi
   echo "$out"
 }
 

@@ -18,6 +18,32 @@ on the host unless you opt out.
 The GitHub token needs access to the target repo only, with contents, issues
 and pull requests. Keep it in the environment, never in a file.
 
+### Dev Containers without VS Code
+
+`devcontainer.json` is an open standard ([containers.dev](https://containers.dev)),
+not a VS Code feature. Any of these can start the container from it:
+
+- **The `devcontainer` CLI** (`npm install -g @devcontainers/cli`):
+
+  ```
+  devcontainer up --workspace-folder .
+  devcontainer exec --workspace-folder . claude --permission-mode auto
+  ```
+
+  It bind-mounts the repo, so the board also opens from disk.
+- **DevPod** (`devpod up .`) gives the container an SSH host. Tools that can
+  run agents over SSH can then run Claude Code inside the container.
+- **VS Code or Codespaces**, which read the file directly.
+
+Tools that don't read `devcontainer.json` (for example agent environments
+that run agents in local worktrees) can still use the container. Start it
+with one of the above, then run Claude Code inside it through
+`devcontainer exec` or the SSH host. Don't run the factory's agents directly
+on the host: the guard script refuses unless you opt out.
+
+This repo's own `.devcontainer/` has everything needed to work on and
+dogfood the factory.
+
 ## Install
 
 ### Once, interactively
