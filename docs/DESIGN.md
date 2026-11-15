@@ -90,7 +90,8 @@ Guard scripts create missing labels idempotently.
 
   ```
   .git/factory/
-    config.json          per-repo config (checks command, merge mode, limits)
+    config.json          per-repo config (checks command, merge mode, commit
+                         and PR conventions, limits)
     PAUSED               kill switch (presence = paused)
     jobs/<job-id>/       one job folder per job
   ```
@@ -142,14 +143,20 @@ and write files can play a role.
 - **Branches.** Names follow the target repo's own convention, read from its
   `AGENTS.md` or contributing docs. The default is
   `<type>/<issue-number>-<slug>` (e.g. `fix/42-null-title`), where `<type>` is
-  the Conventional Commits type recorded in `spec.md`. The branch is created
-  after the spec is written, so the type is known. A prompt job with no
-  tracking issue uses `<type>/<slug>`. Never use a `factory/` prefix or a name
-  that matches a release branch pattern.
-- **Commits and PR titles.** Both use Conventional Commits. Squash merges use
-  the PR title as the commit message, so the PR title must describe the whole
-  change in that format. This keeps semantic-release and changelogs working
-  unchanged.
+  the change type (`feat`, `fix`, …) recorded in `spec.md`. The branch is
+  created after the spec is written, so the type is known. A prompt job with
+  no tracking issue uses `<type>/<slug>`. Never use a `factory/` prefix or a
+  name that matches a release branch pattern.
+- **Commit and PR conventions.** Set per repo in `config.json`:
+
+  | Key | Values |
+  |---|---|
+  | `commit_convention` | `default` (default): whatever the target repo documents in its `AGENTS.md` or contributing docs; if nothing can be identified, as `conventional`.<br>`conventional`: always Conventional Commits, so semantic-release and changelogs work unchanged. |
+  | `pr_convention` | `default` (default): the repo's PR template (e.g. `.github/pull_request_template.md`) and documented title format; if nothing can be identified, as `conventional`.<br>`conventional`: always a title in the commit convention and a body with a summary, the linked issue (`Closes #42`), the acceptance criteria and how they were tested. |
+
+  Whatever the PR convention, squash merges use the PR title as the commit
+  message, so the PR title must describe the whole change and satisfy the
+  commit convention too.
 - **Worktrees.** One per job under `.worktrees/`, ignored by appending to
   `.git/info/exclude`. Disposable: every round is pushed.
 - **Main checkout untouched.** The factory never checks out, edits or commits
@@ -158,7 +165,9 @@ and write files can play a role.
   none, they fall back to `CLAUDE.md`, then the README, contributing docs and
   CI config.
 - **Adoption.** On the first `/factory run` in a repo, the factory detects the
-  base branch and checks command and asks the operator to confirm them once.
+  base branch, checks command, and commit and PR conventions (the repo's own,
+  or Conventional Commits if none can be identified), and asks the operator to
+  confirm them once.
   A guard script then writes `config.json`.
 
 ## Delivery
