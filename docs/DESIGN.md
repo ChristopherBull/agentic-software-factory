@@ -230,8 +230,16 @@ and write files can play a role.
 - **Lane 2 (spec-kit).** For larger features. The operator writes and commits
   the spec interactively with spec-kit, then labels an issue `factory` and
   `factory:speckit`, pointing at the spec directory. The factory skips the
-  specify stage. The approver always escalates in this lane. The factory never
-  runs `specify init` or `specify`.
+  specify stage. The factory never runs `specify init` or `specify`.
+
+  Unlike Lane 1, the approver always escalates in this lane. Lane 2 changes
+  are larger and their specs come from a separate tool, so a human checks
+  every result until there's evidence it can be trusted. This is
+  deliberately temporary. Once spec-kit is integrated, its own artefacts
+  (clarifications, analysis findings, checklists) should help decide when a
+  human is really needed. Alternatively, the operator may choose which
+  spec-kit steps get human review, or under what conditions. **To be
+  decided.**
 
 ## Target repos
 
@@ -320,6 +328,57 @@ This never stops work:
   environment, never from a file.
 - Guard scripts need only Bash, `git`, `gh`, `jq` and coreutils, so no extra
   runtime is required in the container.
+
+## Visibility
+
+The factory is meant to be watched, not just run. Two views show its state,
+and neither ever changes it.
+
+### Board
+
+A lightweight kanban board in the browser, one card per job:
+
+| Column | Holds |
+|---|---|
+| Queued | Jobs waiting to start, including those being claimed. |
+| In progress | Jobs the factory is working on, in any of specify, implement, verify or deliver. |
+| Human review | Jobs waiting on a person: `factory:needs-info`, `factory:needs-human`, or an approved PR the repo needs a person to merge. |
+| Done | Merged, rejected or cancelled. |
+
+- **Cards, with progressive disclosure.** A card stays uncluttered. At a
+  glance it shows only:
+  - the job id and title;
+  - one stage pill (specify, implement, verify or deliver);
+  - small status pills for that stage's agent tasks, e.g. one per reviewer
+    in verify (running, passed, changes requested);
+  - a badge if the job is parked (overlap wait, usage limit).
+
+  Everything else waits until the card is opened: issue and PR links, the
+  agent and its tier, round count, time in stage, and the reports.
+- **Header.** Running or paused, active jobs against the limit (e.g. 2 / 3),
+  merge mode, and any warnings (audit due, jobs parked on usage).
+- **Updates.** Every guard-script transition rewrites the board's data file,
+  and the page picks up the change within a few seconds without a manual
+  reload.
+- **Lightweight.** The board is one static page plus that data file in
+  `.git/factory/board/`. It needs no build step and no runtime of its own. It
+  works opened straight from disk, and is served on `localhost` (forwarded
+  from a Dev Container) when a static file server is available.
+- **Safe.** Issue titles and report text are untrusted, so the page renders
+  them only as text, never as HTML. The server, when used, binds to
+  `localhost` only.
+
+### Statusline
+
+In harnesses with a statusline, the factory appends a short segment, such as
+`🏭 2/3 · #42 implement · #45 verify r2 · ⚠ 1 needs human`. It shows only in
+a repo the factory has adopted, and reads local state only, so it stays fast.
+
+- **Append, never replace.** Any existing statusline the operator has is kept
+  and runs first. The factory segment comes after it, unchanged.
+- **Opt-in and reversible.** The operator turns it on and off explicitly. The
+  harness-specific wiring lives in the harness's reference file; the segment
+  text comes from a guard script, so it's the same in every harness.
 
 ## Model routing
 

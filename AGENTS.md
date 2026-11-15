@@ -20,6 +20,8 @@ skills/factory/        orchestrator skill (/factory)
   references/          harness-specific mechanics (claude-code.md)
 agents/                one prompt per role
 bin/                   guard scripts (Bash)
+board/                 live board page (static, self-contained)
+statusline/            harness statusline wiring
 tests/                 guard script tests, with fake gh/git
 docs/DESIGN.md         runtime design: pipeline, contracts, invariants
 ```
