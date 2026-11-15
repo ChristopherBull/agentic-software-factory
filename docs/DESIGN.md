@@ -15,8 +15,8 @@ How the factory behaves at runtime. For how to work on this repo, see
 | Guard script | A Bash script in `bin/`. The only writer of job state. |
 | Job folder | Per-job directory holding the job state and every role's report. |
 | Report | The single file a role writes into the job folder. |
-| Verdict line | The first line of a report, parsed by guard scripts (e.g. `VERDICT: APPROVE`). |
-| Job header | A fixed line at the top of each report identifying the job and role. |
+| Job header | Line 1 of a report, identifying the job and role. |
+| Verdict line | Line 2 of a report, parsed by guard scripts (e.g. `VERDICT: APPROVE`). |
 | Gate | The target repo's checks (lint, tests), run from the base branch's definition. |
 | Lane | A route through the pipeline (see [Lanes](#lanes)). |
 
@@ -61,6 +61,7 @@ Work enters in one of three ways.
 | `factory:in-progress` | Guard script | Claimed by a running factory. |
 | `factory:needs-info` | Intake | Question asked on the issue; job parked. |
 | `factory:needs-human` | Guard script | Escalated; needs the operator. |
+| `factory:speckit` | Maintainer | Lane 2: build from a committed spec-kit spec. |
 
 Guard scripts create missing labels idempotently.
 
@@ -89,18 +90,22 @@ Guard scripts create missing labels idempotently.
 
   ```
   .git/factory/
-    config.json          per-repo config (checks command, auto-merge, limits)
+    config.json          per-repo config (checks command, merge mode, limits)
     PAUSED               kill switch (presence = paused)
     jobs/<job-id>/       one job folder per job
   ```
 
-- **Sole writers.** Only guard scripts write `config.json` and job state. They
-  hold a lock file while writing and reject any transition not in the
-  transition table.
-- **Claims.** Local state is a cache. The `factory:in-progress` label (plus
-  the claiming user as assignee) is the cross-machine lock. A guard script
-  claims by adding the label, then re-reading the issue. If another factory
-  claimed it first, it backs off.
+- **Sole writers.** Only guard scripts write `config.json`, `PAUSED` and job
+  state. The operator changes them through guard-script commands (for example
+  `factory-job config set <key> <value>`, `factory-job pause`), never by
+  editing files. Guard scripts hold a lock file while writing and reject any
+  transition not in the transition table.
+- **Claims.** Local state is a cache; the issue is the cross-machine lock.
+  Every factory may run as the same GitHub account, so a claim needs its own
+  identity. To claim, a guard script posts a claim comment carrying a unique
+  nonce, then re-reads the issue's comments. The earliest claim comment after
+  the latest `factory` label event wins. The winner adds
+  `factory:in-progress`; any loser deletes its comment and backs off.
 - **Resumable.** A restarted orchestrator rebuilds its view from the job
   folders and GitHub, then carries on. Every guard script is idempotent.
 
@@ -137,9 +142,13 @@ and write files can play a role.
 - **Branches.** Names follow the target repo's own convention, read from its
   `AGENTS.md` or contributing docs. The default is
   `<type>/<issue-number>-<slug>` (e.g. `fix/42-null-title`), where `<type>` is
-  the Conventional Commits type. Never use a `factory/` prefix or a name that
-  matches a release branch pattern.
-- **Commits.** Conventional Commits, so semantic-release and changelogs work
+  the Conventional Commits type recorded in `spec.md`. The branch is created
+  after the spec is written, so the type is known. A prompt job with no
+  tracking issue uses `<type>/<slug>`. Never use a `factory/` prefix or a name
+  that matches a release branch pattern.
+- **Commits and PR titles.** Both use Conventional Commits. Squash merges use
+  the PR title as the commit message, so the PR title must describe the whole
+  change in that format. This keeps semantic-release and changelogs working
   unchanged.
 - **Worktrees.** One per job under `.worktrees/`, ignored by appending to
   `.git/info/exclude`. Disposable: every round is pushed.
@@ -149,8 +158,8 @@ and write files can play a role.
   none, they fall back to `CLAUDE.md`, then the README, contributing docs and
   CI config.
 - **Adoption.** On the first `/factory run` in a repo, the factory detects the
-  base branch and checks command, asks the operator to confirm them once, and
-  writes `config.json`.
+  base branch and checks command and asks the operator to confirm them once.
+  A guard script then writes `config.json`.
 
 ## Delivery
 
@@ -159,8 +168,8 @@ and write files can play a role.
 - By default the factory never merges. An approved PR is merged through the
   repo's own PR process (a maintainer, a merge queue or GitHub auto-merge), so
   its branch protection and required checks decide.
-- The operator can override this by setting `"merge": "gh"` in
-  `config.json`, optionally limited to low-risk changes. The factory then
+- The operator can override this by setting the merge mode to `gh`
+  (`factory-job config set merge gh`), optionally limited to low-risk changes. The factory then
   merges approved PRs itself with `gh pr merge`, which still respects branch
   protection.
 - After the PR opens, the factory watches GitHub CI. Failures go back to the
