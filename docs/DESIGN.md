@@ -3,6 +3,37 @@
 How the factory behaves at runtime. For how to work on this repo, see
 [`AGENTS.md`](../AGENTS.md).
 
+## Principle: maximum automation
+
+The factory runs itself. Once started, it keeps going until every job is
+either finished or waiting on a human for a legitimate reason. The operator
+should never have to nudge it to continue.
+
+Humans are involved only to:
+
+- confirm a repo's settings once, at adoption;
+- decide which issues the factory may pull (a maintainer), either by applying
+  `factory` directly or by reviewing a triager's `factory:candidate` proposal.
+  This is the trust gate: the factory never labels its own work in, so
+  untrusted issue text can't pull itself into the pipeline;
+- answer a `factory:needs-info` question on the issue;
+- review an escalated PR (`factory:needs-human`);
+- merge, through the repo's own PR process.
+
+Everything else is the factory's call:
+
+- **No check-ins.** The orchestrator never asks whether to continue and never
+  stops with work still runnable. Progress goes in files and
+  `factory-job status`, not in questions.
+- **Decide and record.** A role facing a judgement call makes the best
+  decision it can, records it in its report, and carries on. Reviewers and the
+  approver catch bad calls.
+- **Contain failures.** A failure retries once, then escalates that one job.
+  Other jobs keep running.
+- **Unattended by design.** Inside the sandbox, runs need no permission
+  prompts. The orchestrator stays awake by using the harness's own wake-up
+  mechanisms, not by waiting for the operator.
+
 ## Glossary
 
 | Term | Meaning |
@@ -31,6 +62,8 @@ ingress → intake → spec writer → builder → gate ─fail→ builder
 
 Each arrow is a transition made by a guard script. The orchestrator decides
 what to do next from the guard script's output, never by editing state.
+Several jobs can be in the pipeline at once (see
+[Parallel jobs](#parallel-jobs)).
 
 The gate runs the checks as defined on the base branch, not the job branch, so
 a branch can't change the checks it's judged by. A change to a protected path
@@ -44,8 +77,10 @@ Work enters in one of three ways.
 1. **Skill prompt.** The operator runs `/factory <description>`. The text is
    trusted operator input. The factory creates a job directly, and opens a
    tracking issue if the repo uses issues.
-2. **Labelled issues.** `/factory run` polls for open issues labelled
-   `factory` that are not already claimed. Each one is verified (see
+2. **Labelled issues.** `/factory run` claims open issues labelled `factory`
+   that are not already claimed, and runs until the queue is empty and every
+   job is finished or parked. `/factory run --watch` then keeps polling for
+   new issues. Each issue is verified (see
    [Trust boundary](#trust-boundary)), claimed, then queued.
 3. **Triage (optional).** The triager reads unlabelled open issues and judges
    whether each is a good fit: small, well scoped, testable. For a good fit it
@@ -91,7 +126,7 @@ Guard scripts create missing labels idempotently.
   ```
   .git/factory/
     config.json          per-repo config (checks command, merge mode, commit
-                         and PR conventions, limits)
+                         and PR conventions, tiers, parallel limit, limits)
     PAUSED               kill switch (presence = paused)
     jobs/<job-id>/       one job folder per job
   ```
@@ -109,6 +144,40 @@ Guard scripts create missing labels idempotently.
   `factory:in-progress`; any loser deletes its comment and backs off.
 - **Resumable.** A restarted orchestrator rebuilds its view from the job
   folders and GitHub, then carries on. Every guard script is idempotent.
+
+## Parallel jobs
+
+- **Limit.** At most `max_parallel_jobs` jobs are active at once. A guard
+  script enforces the limit: new jobs past it are queued, not started.
+- **Auto-sizing.** `max_parallel_jobs` defaults to `auto`. At the start of
+  each run, the harness layer detects the billing plan and passes it to the
+  guard script (in Claude Code: `subscriptionType` from
+  `claude auth status --json`). The guard script maps it to a limit:
+
+  | Plan | Limit |
+  |---|---|
+  | API billing | 2 |
+  | Pro | 2 |
+  | Max | 3 |
+  | Ultra | 4 |
+  | Unknown or undetectable | 2 |
+
+  The operator can override it with a fixed number
+  (`factory-job config set max_parallel_jobs <n>`), which always wins.
+  Setting it back to `auto` restores detection. The plan is re-detected on
+  every run, so a plan change takes effect without reconfiguring.
+- **Isolation.** Each job has its own worktree, branch, job folder and
+  builder. Roles from different jobs never share context. Guard scripts lock
+  per job for job state, plus one repo-wide lock for claims and the limit.
+- **No blocking.** The orchestrator runs roles in the background. When any
+  role finishes, it advances that job and starts the next queued job if a
+  slot is free.
+- **Overlap.** `spec.md` lists the paths the change expects to touch. A job
+  whose paths overlap an active job's waits until that job's PR is ready, so
+  two jobs never edit the same files at once.
+- **Base drift.** Before opening the PR, a guard script rebases the branch
+  onto the latest base and re-runs the gate. A conflict goes back to the
+  builder once, then escalates.
 
 ## File contracts
 
@@ -195,6 +264,10 @@ These stop work:
 - **Kill switch.** Guard scripts refuse to start or advance any job while
   `.git/factory/PAUSED` exists. Removing the `factory` label from an issue
   cancels its job at the next transition.
+- **Usage limits.** A role that hits a usage or rate limit parks its job
+  (`waiting-usage`), and the job resumes automatically once the limit resets.
+  This is not a failure and never escalates on its own. While any job is
+  parked this way, no new jobs start.
 
 This never stops work:
 
@@ -213,7 +286,15 @@ This never stops work:
 
 ## Model routing
 
-Roles are routed by tier (`cheap`, `strong`), not by model id. Each harness
-reference file maps tiers to its models. Reviewers are chosen by risk and by
+Roles are routed by tier, not by model id:
+
+| Tier | Claude Code default | Used for |
+|---|---|---|
+| `strong` | Claude Opus 5.5 at `high` effort. Claude Fable 5.2 at `high` is an opt-in (about twice the cost). | Intake, spec writer, builder, approver |
+| `cheap` | Claude Sonnet 5.5 at `medium` effort. | Reviewers |
+
+Each tier's model and effort can be overridden per repo (e.g.
+`factory-job config set tiers.strong.model fable`). Each harness's reference
+file maps tiers to that harness's models. Reviewers are chosen by risk and by
 which areas of the code the change touches; the routing table lives in
 `config.json`, not in prompts.
