@@ -3,6 +3,10 @@
 A software factory, built initially for Claude Code: specify, implement,
 verify, deliver.
 
+> [!WARNING]
+> 🚧 **Work in progress:** the design is written; the factory itself isn't
+> built yet.
+
 Work goes in as GitHub issues, either labelled `factory` by a maintainer or
 created from `/factory <description>`. Reviewed pull requests come out. The
 factory runs itself and only stops for a person when it genuinely needs one.
@@ -37,10 +41,6 @@ flowchart LR
   merging follows the repo's own settings.
 - **You can watch it:** a live kanban board and a statusline segment show
   every job's progress.
-
-> [!WARNING]
-> 🚧 **Work in progress:** the design is written; the factory itself isn't
-> built yet.
 
 - [Design](docs/DESIGN.md): how the factory works at runtime.
 - [Repo optimisations](docs/REPO-OPTIMISATIONS.md): settings that help
