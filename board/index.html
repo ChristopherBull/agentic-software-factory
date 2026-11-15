@@ -1,0 +1,396 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Factory board</title>
+<style>
+:root {
+  --page: #e7eae8; --panel: #f7f8f7; --card: #ffffff; --line: #cfd5d2;
+  --ink: #26323a; --muted: #5d6970; --amber: #d99a00; --amber-soft: #fbf0cf;
+  --green: #2f8a57; --green-soft: #dcefe3; --red: #b8402c; --red-soft: #f6ddd7;
+  --steel-soft: #e1e6e8; --focus: #1f6fb2;
+  --head: "Bahnschrift", "DIN Alternate", "DIN 2014", "Barlow", "Roboto Condensed", system-ui, sans-serif;
+  --body: system-ui, -apple-system, "Segoe UI", Ubuntu, Cantarell, sans-serif;
+  --mono: ui-monospace, "SF Mono", "Cascadia Mono", "DejaVu Sans Mono", monospace;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --page: #192126; --panel: #1f282e; --card: #263138; --line: #34424a;
+    --ink: #e3e9e6; --muted: #9aa8ae; --amber: #f2b632; --amber-soft: #3b3220;
+    --green: #5cc28a; --green-soft: #1f3a2c; --red: #ec7a63; --red-soft: #432722;
+    --steel-soft: #2c383f; --focus: #6fb3ee;
+    color-scheme: dark;
+  }
+}
+* { box-sizing: border-box; }
+html, body { height: 100%; }
+body {
+  margin: 0; background: var(--page); color: var(--ink);
+  font: 15px/1.45 var(--body); display: flex; flex-direction: column;
+}
+button { font: inherit; color: inherit; }
+:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+
+header.bar {
+  display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 20px;
+  padding: 14px 20px 12px; border-bottom: 1px solid var(--line); background: var(--panel);
+}
+.brand { font-family: var(--head); font-size: 22px; font-weight: 600; letter-spacing: .01em; margin: 0; }
+.repo { color: var(--muted); font-size: 14px; }
+.facts { display: flex; flex-wrap: wrap; gap: 6px 18px; margin-left: auto; align-items: baseline; }
+.fact { font-size: 14px; color: var(--muted); }
+.fact strong { color: var(--ink); font-family: var(--head); font-weight: 600; font-variant-numeric: tabular-nums; font-size: 16px; }
+.state { display: inline-flex; align-items: center; gap: 6px; font-weight: 600; color: var(--ink); }
+.state::before { content: ""; width: 9px; height: 9px; border-radius: 50%; background: var(--green); }
+.state.paused::before { background: var(--amber); }
+
+.notes { display: flex; flex-direction: column; gap: 1px; }
+.note {
+  display: flex; gap: 12px; align-items: flex-start; padding: 9px 20px;
+  background: var(--amber-soft); border-bottom: 1px solid var(--line); font-size: 14px;
+}
+.note p { margin: 0; max-width: 78ch; }
+.note code { font-family: var(--mono); font-size: 13px; background: var(--card); padding: 1px 5px; border-radius: 3px; user-select: all; }
+.note button { margin-left: auto; background: none; border: 1px solid var(--line); border-radius: 4px; padding: 2px 10px; cursor: pointer; }
+.note.error { background: var(--red-soft); }
+
+main.board {
+  flex: 1; min-height: 0; display: grid; grid-template-columns: repeat(4, minmax(220px, 1fr));
+  gap: 14px; padding: 16px 20px 20px; overflow-x: auto;
+}
+.col { display: flex; flex-direction: column; min-height: 0; background: var(--panel); border-radius: 8px; border: 1px solid var(--line); }
+.col > h2 {
+  display: flex; align-items: baseline; justify-content: space-between; margin: 0;
+  padding: 11px 14px 9px; font-family: var(--head); font-size: 17px; font-weight: 600;
+  border-bottom: 1px solid var(--line);
+}
+.col > h2 .n { font-variant-numeric: tabular-nums; color: var(--muted); font-size: 15px; }
+/* The andon light: Human review only lights up when someone is needed. */
+.col.andon { position: relative; }
+.col.andon.lit { border-color: var(--amber); box-shadow: inset 0 4px 0 var(--amber); }
+.col.andon.lit > h2 .n { color: var(--ink); background: var(--amber); padding: 0 8px; border-radius: 10px; color: #26323a; }
+.cards { list-style: none; margin: 0; padding: 10px; display: flex; flex-direction: column; gap: 8px; overflow-y: auto; flex: 1; }
+.empty { color: var(--muted); font-size: 14px; padding: 6px 4px; max-width: 32ch; }
+
+.card {
+  width: 100%; text-align: left; background: var(--card); border: 1px solid var(--line);
+  border-radius: 6px; padding: 10px 12px 11px; cursor: pointer; display: block;
+}
+.card:hover { border-color: var(--muted); }
+.card[aria-expanded="true"] { border-color: var(--focus); }
+.card .id { font-family: var(--head); font-size: 13px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.card .title { display: block; margin: 2px 0 8px; font-weight: 550; overflow-wrap: anywhere; }
+.pills { display: flex; flex-wrap: wrap; gap: 5px; }
+.pill {
+  display: inline-flex; align-items: center; gap: 5px; font-size: 12.5px; line-height: 1;
+  padding: 4px 8px; border-radius: 999px; background: var(--steel-soft); color: var(--ink); white-space: nowrap;
+}
+.pill.stage { background: var(--ink); color: var(--panel); font-weight: 600; }
+.pill i { font-style: normal; width: 8px; height: 8px; border-radius: 50%; background: var(--muted); flex: none; }
+.pill.pass i, .pill.approve i { background: var(--green); }
+.pill.changes i, .pill.escalate i { background: var(--amber); }
+.pill.fail i { background: var(--red); }
+.pill.pending i { background: transparent; box-shadow: inset 0 0 0 1.5px var(--muted); }
+.pill.running i { background: var(--focus); animation: pulse 1.6s ease-in-out infinite; }
+.pill.parked { background: var(--amber-soft); }
+.pill.outcome-merged { background: var(--green-soft); }
+.pill.outcome-rejected, .pill.outcome-cancelled { background: var(--steel-soft); color: var(--muted); }
+.pill.wait { background: var(--amber-soft); }
+@keyframes pulse { 50% { opacity: .35; } }
+.card.moved { animation: moved 1.4s ease-out; }
+@keyframes moved { 0% { box-shadow: 0 0 0 3px var(--focus); } 100% { box-shadow: 0 0 0 0 transparent; } }
+
+aside.drawer {
+  position: fixed; top: 0; right: 0; bottom: 0; width: min(620px, 100vw);
+  background: var(--panel); border-left: 1px solid var(--line); display: flex; flex-direction: column;
+  transform: translateX(100%); transition: transform .22s ease-out; z-index: 2;
+  box-shadow: -12px 0 32px rgba(25, 33, 38, .18);
+}
+aside.drawer.open { transform: none; }
+.drawer header { padding: 16px 20px 12px; border-bottom: 1px solid var(--line); }
+.drawer h3 { font-family: var(--head); font-size: 20px; font-weight: 600; margin: 2px 0 10px; overflow-wrap: anywhere; }
+.drawer .close { float: right; background: none; border: 1px solid var(--line); border-radius: 4px; padding: 2px 10px; cursor: pointer; }
+dl.meta { display: grid; grid-template-columns: max-content 1fr; gap: 4px 14px; margin: 0; font-size: 14px; }
+dl.meta dt { color: var(--muted); }
+dl.meta dd { margin: 0; overflow-wrap: anywhere; }
+dl.meta a { color: var(--focus); }
+.reports { display: flex; flex-direction: column; min-height: 0; flex: 1; }
+.tabs { display: flex; flex-wrap: wrap; gap: 4px; padding: 10px 20px 0; }
+.tab { background: none; border: 1px solid var(--line); border-radius: 4px; padding: 3px 9px; font-size: 13px; cursor: pointer; }
+.tab[aria-selected="true"] { background: var(--ink); color: var(--panel); border-color: var(--ink); }
+pre.report {
+  flex: 1; margin: 10px 20px 20px; padding: 12px 14px; overflow: auto; white-space: pre-wrap;
+  overflow-wrap: anywhere; background: var(--card); border: 1px solid var(--line); border-radius: 6px;
+  font: 12.5px/1.55 var(--mono);
+}
+.foot { padding: 0 20px 14px; color: var(--muted); font-size: 13px; }
+
+@media (max-width: 900px) { main.board { grid-template-columns: repeat(4, minmax(240px, 80vw)); } }
+@media (prefers-reduced-motion: reduce) {
+  .pill.running i, .card.moved { animation: none; }
+  aside.drawer { transition: none; }
+}
+</style>
+</head>
+<body>
+<header class="bar">
+  <h1 class="brand">Factory</h1>
+  <span class="repo" id="repo"></span>
+  <div class="facts" id="facts"></div>
+</header>
+<div class="notes" id="notes"></div>
+<main class="board" id="board">
+  <section class="col" data-col="queued"><h2>Queued <span class="n"></span></h2><ol class="cards"></ol></section>
+  <section class="col" data-col="in-progress"><h2>In progress <span class="n"></span></h2><ol class="cards"></ol></section>
+  <section class="col andon" data-col="human-review"><h2>Human review <span class="n"></span></h2><ol class="cards"></ol></section>
+  <section class="col" data-col="done"><h2>Done <span class="n"></span></h2><ol class="cards"></ol></section>
+</main>
+<aside class="drawer" id="drawer" aria-hidden="true" aria-labelledby="d-title">
+  <header>
+    <button class="close" id="d-close" type="button">Close</button>
+    <span class="id" id="d-id"></span>
+    <h3 id="d-title"></h3>
+    <dl class="meta" id="d-meta"></dl>
+  </header>
+  <div class="reports">
+    <div class="tabs" id="d-tabs" role="tablist" aria-label="Reports"></div>
+    <pre class="report" id="d-report" tabindex="0"></pre>
+  </div>
+  <p class="foot" id="d-foot"></p>
+</aside>
+<script>
+"use strict";
+// Everything shown here comes from data.js, written by the guard script. Issue
+// titles and reports are untrusted text, so they only ever go into textContent.
+const POLL_MS = 3000;
+const FROM_DISK = location.protocol === "file:";
+const STAGES = { specify: "Specify", implement: "Implement", verify: "Verify", deliver: "Deliver" };
+const AGENTS = {
+  specifier: "Specifier", implementer: "Implementer", gate: "Checks",
+  "reviewer-code": "Code review", "reviewer-security": "Security review",
+  "reviewer-ux": "UX review", "reviewer-ui": "UI review", pr: "Pull request", approver: "Approval"
+};
+const STATUS = {
+  pending: "waiting", running: "running", pass: "passed", changes: "changes requested",
+  fail: "failed", approve: "approved", escalate: "escalated"
+};
+const TIERS = {
+  specifier: "strong", implementer: "strong", "reviewer-security": "strong", approver: "strong",
+  "reviewer-code": "cheap", "reviewer-ux": "cheap", "reviewer-ui": "cheap"
+};
+const EMPTY = {
+  queued: "Nothing waiting. Label an issue factory, or run /factory with a description.",
+  "in-progress": "No jobs running.",
+  "human-review": "Nothing needs you.",
+  done: "Finished jobs appear here."
+};
+
+let data = null, lastJson = "", openId = null, openReport = null;
+const lastColumn = new Map();
+
+function el(tag, cls, text) {
+  const n = document.createElement(tag);
+  if (cls) n.className = cls;
+  if (text !== undefined && text !== null) n.textContent = String(text);
+  return n;
+}
+function safeUrl(u) { return typeof u === "string" && /^https:\/\/github\.com\//.test(u) ? u : null; }
+function ago(iso) {
+  const s = Math.max(0, (Date.now() - Date.parse(iso)) / 1000);
+  if (!isFinite(s)) return "";
+  if (s < 60) return "just now";
+  if (s < 3600) return Math.round(s / 60) + " min";
+  if (s < 86400) return Math.round(s / 3600) + " h";
+  return Math.round(s / 86400) + " d";
+}
+function store(get, key, val) {
+  try { return get ? sessionStorage.getItem(key) : sessionStorage.setItem(key, val); } catch (e) { return null; }
+}
+
+function pill(text, cls, title) {
+  const p = el("span", "pill " + (cls || ""));
+  if (cls && /\b(pass|changes|fail|pending|running|approve|escalate)\b/.test(cls)) p.append(el("i"));
+  p.append(document.createTextNode(text));
+  if (title) p.title = title;
+  return p;
+}
+
+function cardPills(job) {
+  const wrap = el("span", "pills");
+  if (job.column === "in-progress") {
+    let label = STAGES[job.stage] || job.stage;
+    if (job.stage === "verify" || job.stage === "implement") label += ", round " + job.round;
+    wrap.append(pill(label, "stage"));
+    for (const [agent, status] of Object.entries(job.agents || {})) {
+      wrap.append(pill(AGENTS[agent] || agent, status, (AGENTS[agent] || agent) + ": " + (STATUS[status] || status)));
+    }
+  } else if (job.column === "human-review") {
+    const why = { "needs-info": "Question asked", escalated: "Escalated", approved: "Approved, waiting to merge" };
+    wrap.append(pill(why[job.stage] || job.stage, "wait"));
+  } else if (job.column === "done") {
+    wrap.append(pill(job.stage.charAt(0).toUpperCase() + job.stage.slice(1), "outcome-" + job.stage));
+  }
+  if (job.parked) wrap.append(pill("Parked: " + job.parked.reason + " limit", "parked"));
+  return wrap;
+}
+
+function renderNotes() {
+  const notes = document.getElementById("notes");
+  const list = [];
+  for (const w of (data && data.warnings) || []) list.push({ text: w });
+  if (FROM_DISK && store(true, "factory-disk-note") !== "dismissed") {
+    list.push({
+      disk: true,
+      text: "Opened from disk, without a server. Updates still arrive, but may be less smooth, and this only works where your browser can see these files. To serve it, install a server:",
+      code: (data && data.install_hint) || "Install python3 (or node, or busybox)",
+      after: "then run /factory board and open the URL it prints."
+    });
+  }
+  notes.replaceChildren(...list.map(n => {
+    const box = el("div", "note" + (n.error ? " error" : ""));
+    const p = el("p", null, n.text);
+    if (n.code) { p.append(" ", el("code", null, n.code), " " + n.after); }
+    box.append(p);
+    if (n.disk) {
+      const b = el("button", null, "Dismiss");
+      b.type = "button";
+      b.addEventListener("click", () => { store(false, "factory-disk-note", "dismissed"); renderNotes(); });
+      box.append(b);
+    }
+    return box;
+  }));
+}
+
+function renderHeader() {
+  document.getElementById("repo").textContent = data.repo || "";
+  const facts = document.getElementById("facts");
+  const state = el("span", "fact state" + (data.paused ? " paused" : ""), data.paused ? "Paused" : "Running");
+  const slots = el("span", "fact");
+  slots.append(el("strong", null, data.active + " of " + data.limit), " jobs in progress");
+  const merge = el("span", "fact", data.merge_mode === "repo" ? "Merges follow the repo's own process" : "Merge mode: " + data.merge_mode);
+  const updated = el("span", "fact", "Updated " + ago(data.generated_at) + (ago(data.generated_at) === "just now" ? "" : " ago"));
+  facts.replaceChildren(state, slots, merge, updated);
+}
+
+function renderColumns() {
+  const order = { specify: 0, implement: 1, verify: 2, deliver: 3 };
+  for (const col of document.querySelectorAll(".col")) {
+    const name = col.dataset.col;
+    const list = col.querySelector(".cards");
+    const scroll = list.scrollTop;
+    const jobs = (data.jobs || []).filter(j => j.column === name).sort((a, b) =>
+      name === "done" ? (b.updated_at || "").localeCompare(a.updated_at || "")
+      : name === "in-progress" ? (order[b.stage] - order[a.stage]) || a.created_at.localeCompare(b.created_at)
+      : a.created_at.localeCompare(b.created_at));
+    col.querySelector(".n").textContent = jobs.length;
+    if (col.classList.contains("andon")) col.classList.toggle("lit", jobs.length > 0);
+    if (!jobs.length) { list.replaceChildren(el("li", "empty", EMPTY[name])); continue; }
+    list.replaceChildren(...jobs.map(job => {
+      const li = el("li");
+      const card = el("button", "card");
+      card.type = "button";
+      card.dataset.id = job.id;
+      card.setAttribute("aria-expanded", String(job.id === openId));
+      card.append(el("span", "id", "#" + job.issue), el("span", "title", job.title), cardPills(job));
+      card.addEventListener("click", () => openJob(job.id));
+      const before = lastColumn.get(job.id);
+      if (before && before !== job.column) card.classList.add("moved");
+      lastColumn.set(job.id, job.column);
+      li.append(card);
+      return li;
+    }));
+    list.scrollTop = scroll;
+  }
+}
+
+function renderDrawer() {
+  const drawer = document.getElementById("drawer");
+  const job = openId && data && (data.jobs || []).find(j => j.id === openId);
+  drawer.classList.toggle("open", !!job);
+  drawer.setAttribute("aria-hidden", String(!job));
+  if (!job) return;
+  document.getElementById("d-id").textContent = "#" + job.issue + "  " + job.id;
+  document.getElementById("d-title").textContent = job.title;
+  const meta = document.getElementById("d-meta");
+  const rows = [];
+  const link = (label, url) => { const u = safeUrl(url); if (u) { const a = el("a", null, label); a.href = u; a.target = "_blank"; a.rel = "noopener"; return a; } return null; };
+  rows.push(["Stage", (STAGES[job.stage] || job.stage) + (job.parked ? " (parked: " + job.parked.reason + ")" : "")]);
+  if (job.column === "in-progress") rows.push(["Round", job.round + " of " + job.round_limit]);
+  const running = (job.running || []).map(a => (AGENTS[a] || a) + " (" + (TIERS[a] || "?") + " tier)");
+  if (running.length) rows.push(["Working now", running.join(", ")]);
+  rows.push(["In this stage", ago(job.stage_since)]);
+  if (job.escalation) rows.push(["Why it needs you", job.escalation]);
+  const issue = link("Issue #" + job.issue, job.url);
+  if (issue) rows.push(["Issue", issue]);
+  const pr = link("Pull request #" + job.pr, job.pr_url);
+  if (pr) rows.push(["Pull request", pr]);
+  if (job.branch) rows.push(["Branch", job.branch]);
+  meta.replaceChildren(...rows.flatMap(([k, v]) => { const dd = el("dd"); typeof v === "string" ? dd.textContent = v : dd.append(v); return [el("dt", null, k), dd]; }));
+
+  const reports = job.reports || [];
+  if (!reports.some(r => r.name === openReport)) openReport = reports.length ? reports[reports.length - 1].name : null;
+  const tabs = document.getElementById("d-tabs");
+  tabs.replaceChildren(...reports.map(r => {
+    const t = el("button", "tab", r.name);
+    t.type = "button";
+    t.setAttribute("role", "tab");
+    t.setAttribute("aria-selected", String(r.name === openReport));
+    t.addEventListener("click", () => { openReport = r.name; renderDrawer(); });
+    return t;
+  }));
+  const pre = document.getElementById("d-report");
+  const current = reports.find(r => r.name === openReport);
+  const scroll = pre.scrollTop;
+  pre.textContent = current ? current.text : "No reports yet.";
+  pre.scrollTop = scroll;
+  const last = (job.history_tail || []).slice(-1)[0];
+  document.getElementById("d-foot").textContent = last ? "Last change: " + last.why + ", " + ago(last.at) + (ago(last.at) === "just now" ? "" : " ago") + "." : "";
+}
+
+function openJob(id) {
+  openId = id; openReport = null;
+  renderColumns(); renderDrawer();
+  document.getElementById("d-close").focus();
+}
+function closeJob() {
+  const id = openId;
+  openId = null;
+  renderColumns(); renderDrawer();
+  const card = id && document.querySelector('.card[data-id="' + CSS.escape(id) + '"]');
+  if (card) card.focus();
+}
+document.getElementById("d-close").addEventListener("click", closeJob);
+document.addEventListener("keydown", e => { if (e.key === "Escape" && openId) closeJob(); });
+
+function render() {
+  renderHeader(); renderNotes(); renderColumns(); renderDrawer();
+}
+
+function load() {
+  const s = document.createElement("script");
+  s.src = "data.js?t=" + Date.now();
+  s.onload = () => {
+    s.remove();
+    const next = window.FACTORY_BOARD;
+    if (!next) return;
+    const json = JSON.stringify(next);
+    if (json === lastJson) { renderHeader(); return; }
+    lastJson = json; data = next; render();
+  };
+  s.onerror = () => {
+    s.remove();
+    if (!data) {
+      const box = el("div", "note error");
+      box.append(el("p", null, "Can't read data.js next to this page. Run /factory board to regenerate it."));
+      document.getElementById("notes").replaceChildren(box);
+    }
+  };
+  document.head.append(s);
+}
+load();
+setInterval(load, POLL_MS);
+</script>
+</body>
+</html>
