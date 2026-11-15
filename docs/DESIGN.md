@@ -290,11 +290,12 @@ Roles are routed by tier, not by model id:
 
 | Tier | Claude Code default | Used for |
 |---|---|---|
-| `strong` | Claude Opus 5.5 at `high` effort. Claude Fable 5.2 at `high` is an opt-in (about twice the cost). | Intake, spec writer, builder, approver |
-| `cheap` | Claude Sonnet 5.5 at `medium` effort. | Reviewers |
+| `strong` | Claude Opus 5.5 at `high` effort. Claude Fable 5.2 at `high` is an opt-in (about twice the cost). | Intake, spec writer, builder, security reviewer, approver |
+| `cheap` | Claude Sonnet 5.5 at `medium` effort. | Code, UX and UI reviewers |
 
 Each tier's model and effort can be overridden per repo (e.g.
 `factory-job config set tiers.strong.model fable`). Each harness's reference
 file maps tiers to that harness's models. Reviewers are chosen by risk and by
 which areas of the code the change touches; the routing table lives in
-`config.json`, not in prompts.
+`config.json`, not in prompts. The reviewers in a round run in parallel, and
+the round is complete only when every routed reviewer has written its report.
