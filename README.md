@@ -4,8 +4,8 @@ A software factory, built initially for Claude Code: specify, implement,
 verify, deliver.
 
 > [!WARNING]
-> 🚧 **Work in progress:** the design is written; the factory itself isn't
-> built yet.
+> 🚧 **Work in progress:** the first version is built and tested, but not yet
+> proven end to end on a real repo.
 
 Work goes in as GitHub issues, either labelled `factory` by a maintainer or
 created from `/factory <description>`. Reviewed pull requests come out. The
@@ -42,6 +42,7 @@ flowchart LR
 - **You can watch it:** a live kanban board and a statusline segment show
   every job's progress.
 
+- [Install](docs/INSTALL.md): installing, enabling and running the plugin.
 - [Design](docs/DESIGN.md): how the factory works at runtime.
 - [Repo optimisations](docs/REPO-OPTIMISATIONS.md): settings that help
   approved factory PRs land faster, and their trade-offs.

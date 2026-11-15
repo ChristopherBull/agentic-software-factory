@@ -209,6 +209,9 @@ The first command run in a repo that hasn't been adopted yet starts
   script reads the issue timeline for the most recent `labeled: factory` event
   and checks that the actor has triage, maintain, write or admin permission.
   Otherwise it refuses.
+- **Organisation repos.** In an org repo, everyone with triage access can
+  admit work. To narrow that, set `trusted_labellers` to a list of GitHub
+  logins: only their labels (and their answers to questions) count.
 - **Snapshot.** At claim time the guard script writes the issue title, body
   and comments to `issue.md` in the job folder. Later edits are ignored. Later
   comments re-enter only if their author has triage access or above (for
@@ -255,21 +258,26 @@ defaults.
 
 | Key | Meaning | Default |
 |---|---|---|
+| `repo` | The GitHub repo, `owner/name`. | Detected at adoption |
 | `base_branch` | Branch jobs start from and PRs target. | Detected at adoption |
 | `checks` | The gate's checks command. | Detected at adoption |
-| `protected_paths` | Paths a job may not change without escalating. | CI config and the checks' files |
-| `conventions` | Commit and PR conventions: `default` or `conventional`. | Detected at adoption |
+| `protected_paths` | Globs a job may not change without escalating. | CI config and the checks' files |
+| `conventions` | Commit and PR conventions: `default` or `conventional`. | `default` |
 | `max_parallel_jobs` | Jobs active at once. | Proposed from the plan at adoption |
 | `merge_mode` | What happens after approval. Only `repo` for now. | `repo` |
 | `tiers.<tier>.model`, `tiers.<tier>.effort` | Model and effort per tier. | From the harness reference file |
-| `routing` | Which reviewers a job gets. | Code and security reviewers |
+| `routing` | Which reviewers a job gets. | `["reviewer-code", "reviewer-security"]` |
+| `max_rounds` | Rounds per job before it escalates. | 3 |
+| `gate_timeout` | Seconds the checks may run. | 1800 |
+| `trusted_labellers` | If set, only these logins can admit work. | `[]` (anyone with triage access) |
 | `triage_batch` | Issues assessed per triage run. | 10 |
 | `audit_days` | Days before an audit counts as stale. | 30 |
 | `statusline` | Show the factory's statusline segment: `on` or `off`. | `off` |
+| `board_port` | First port the board's server tries. | 4173 |
 | `allow_host` | Allow unattended runs outside a Dev Container. | `false` |
-| `audit.models_seen`, `audit.last_run` | Written by the audit, never set by hand. | — |
+| `audit.models_seen`, `audit.last_run` | Written by `audit apply`, never set by hand. | — |
 
-Key names are provisional until the guard script is written.
+`factory-job config set` refuses unknown keys and invalid values.
 
 ## Parallel jobs
 
@@ -342,9 +350,32 @@ The job id is the issue number and a slug of its title. Its worktree is
 | `approval.md` | `APPROVE` / `ESCALATE` | `ESCALATE`: each concern. |
 | `audit.md` | `CURRENT` / `CHANGES-RECOMMENDED` | Each recommendation's evidence, reason and command. |
 
-Fields the guard script reads (such as the change type) use a fixed format.
-The exact header, verdict and field formats are fixed when the guard script is
-written, and recorded here.
+### Formats
+
+Every report starts with exactly these two lines:
+
+```
+<!-- factory job=42-null-title agent=reviewer-security round=1 -->
+VERDICT: CHANGES
+```
+
+- The header must name the job and agent it was written for. The
+  implementer's and reviewers' headers must also name the current round, so
+  a report left over from an earlier round never counts.
+- Fields the guard script reads are lines of the form `NAME: value`
+  directly after the verdict:
+
+  | Field | In | Used for |
+  |---|---|---|
+  | `TYPE:` | `specification.md` (`READY`) | The branch name, e.g. `fix/42-null-title`. |
+  | `TITLE:` | `implementation.md` | The PR title. The rest of the report is the PR body. |
+  | `MODELS-SEEN:` | `audit.md` | Comma-separated model ids, recorded by `audit apply`. |
+  | `COMMAND:` | `audit.md` | One `factory-job config set <key> <value>` per recommendation. `audit apply` refuses anything else. |
+
+- For `NEEDS-INFO` and `REJECT`, the text after the verdict is posted on the
+  issue as written.
+- The guard script writes `gate.md` itself, with `agent=gate` and `PASS` or
+  `FAIL`.
 
 ## Target repos
 
@@ -413,7 +444,10 @@ This never stops work:
 ## Sandbox
 
 - Unattended runs must happen inside a Dev Container. The guard script
-  refuses on the host unless the operator opts out explicitly.
+  detects one from `REMOTE_CONTAINERS`, `CODESPACES`, `/.dockerenv` or
+  `/run/.containerenv`. On the host it refuses to run jobs unless the operator
+  opts out explicitly, for one command (`FACTORY_ALLOW_HOST=1`) or for the
+  repo (`allow_host`).
 - The GitHub token is the least privilege that works: the target repo only,
   with contents, issues and pull requests access. It comes from the
   environment, never from a file.
@@ -555,13 +589,45 @@ changing it.
   decide when a human is really needed. Alternatively, the operator may choose
   which spec-kit steps get human review, or under what conditions. **To be
   decided.**
+
+  Known pitfalls to design around:
+  - **Preflight.** Offer Lane 2 only in repos that already have `.specify/`.
+    Check that the spec directory exists on the base branch and has no
+    `[NEEDS CLARIFICATION]` markers left.
+  - **Stages.** Generate `tasks.md` if it's missing. Treat spec-kit's analyse
+    step as a gate, where critical findings escalate. The implementer works
+    through `tasks.md` from the top, ticking tasks off. Spec-kit's converge
+    step acts as a reviewer: unbuilt work counts as changes requested.
+  - **Feature numbers** come from scanning `specs/` in the checkout, so two
+    worktrees can pick the same number. If the factory ever creates specs,
+    pass the feature directory explicitly.
+  - **Spec-kit's git hooks** create branches and can auto-commit, which
+    fights the factory's own branches. Disable or neutralise them in factory
+    runs.
+  - **Pin the spec-kit version** each repo was tested with, and warn on a
+    mismatch.
+  - **Never parse spec-kit's output formats directly**, because they change.
+    Agents that wrap spec-kit still write factory-format reports.
+  - **One PR per task** (spec-kit's task-to-issue fan-out) is tempting, but
+    tasks are usually too small and too inter-dependent. Leave it out.
+- **Triage** (ingress 4). The guard script already reserves the triager's tier
+  and the `factory:candidate` and `factory:not-candidate` labels.
+- **UX and UI reviewers.** They need a browser CLI (to be chosen), not an MCP
+  server. Their routing names and tier are already reserved.
+- **Risk-based routing.** Choose reviewers by the change's risk and the areas
+  it touches, e.g. a low-risk change with no UI gets the code reviewer only.
+  Until then, `routing` is one list for every job.
 - **Watching CI after the PR opens.** Failures go back to the implementer in
   one batch per round, up to 3 CI-fix rounds.
 - **`factory` merge mode.** The factory merges an approved PR itself once it
   is fully resolved: CI green and every review comment addressed. It depends
   on watching CI.
 - **Budget check** before starting each job, parking the queue when usage is
-  over a configured limit.
+  over a configured limit (for example, an operator-supplied usage-check
+  command).
+- **Other harnesses.** Port the orchestrator by adding a reference file and
+  translating agent frontmatter; the guard script and file contracts don't
+  change. A cheap reviewer could then run on a local model.
 - **Overlap detection.** Specifications list the paths they expect to touch,
   and a job that overlaps an active one waits. Until then, worktrees keep
   parallel jobs apart on disk and the rebase before the PR catches conflicts.

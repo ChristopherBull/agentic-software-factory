@@ -10,9 +10,11 @@ factory itself behaves at runtime is specified in
 
 ## Status
 
-Early design. Nothing is built yet.
+MVP built and tested against a fake `gh` (see Commands). Not yet run end to
+end against a real GitHub repo. Everything under Future in
+`docs/DESIGN.md` is not built.
 
-## Layout (planned)
+## Layout
 
 ```
 .claude-plugin/        plugin and marketplace manifests
@@ -22,12 +24,10 @@ agents/                one prompt per role
 bin/                   guard scripts (Bash)
 board/                 live board page (static, self-contained)
 statusline/            harness statusline wiring
-tests/                 guard script tests, with fake gh/git
-docs/DESIGN.md         runtime design: pipeline, contracts, invariants
+tests/                 guard script tests (real git, fake gh)
+docs/DESIGN.md         runtime design: pipeline, contracts, settings
+docs/INSTALL.md        installing, enabling and running the plugin
 ```
-
-`docs/plans/` is local-only scratch space and deliberately ignored. Never
-commit it, link to it or rely on it.
 
 ## Portability rules
 
@@ -53,6 +53,22 @@ commit it, link to it or rely on it.
 - Guard scripts are Bash: `set -euo pipefail`, `shellcheck`-clean, and no
   runtime dependency beyond those in portability rule 4. Python is out of
   scope until Bash is demonstrably not enough.
-- Guard scripts get tests with fake `gh` and `git` on `PATH` before they are
-  relied on.
-- Commands for setup, lint and tests go here once the code exists.
+- Guard scripts get tests before they are relied on. Tests use real `git`
+  against a throwaway bare remote, and the fake `gh` in `tests/fake-gh/` on
+  `PATH`. When the guard script makes a new kind of `gh` call, extend the
+  fake to match; it fails loudly on calls it doesn't know.
+- Never edit files under `.git/factory/` by hand, in tests or otherwise;
+  go through `bin/factory-job`.
+
+## Commands
+
+Requirements: Bash, `git`, `jq`, `shellcheck`. No `gh` login is needed for
+the tests.
+
+```
+tests/run.sh                 # all guard-script tests
+tests/run.sh <pattern>       # tests whose names contain <pattern>
+shellcheck bin/factory-job tests/run.sh tests/fake-gh/gh statusline/*.sh
+```
+
+To try the plugin without installing it: `claude --plugin-dir <this repo>`.
