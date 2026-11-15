@@ -10,7 +10,7 @@ factory itself behaves at runtime is specified in
 
 ## Status
 
-MVP built and tested against a fake `gh` (see Commands). Not yet run end to
+MVP built, shellcheck-clean, and tested against a fake `gh` (see Commands). Not yet run end to
 end against a real GitHub repo. Everything under Future in
 `docs/DESIGN.md` is not built.
 
@@ -70,5 +70,10 @@ tests/run.sh                 # all guard-script tests
 tests/run.sh <pattern>       # tests whose names contain <pattern>
 shellcheck bin/factory-job tests/run.sh tests/fake-gh/gh statusline/*.sh
 ```
+
+CI (`.github/workflows/ci.yml`) runs shellcheck, checks the plugin manifests
+and agent frontmatter, and runs the tests, on every pull request and push to
+`main`. `.shellcheckrc` disables SC2016 only: jq programs are single-quoted on
+purpose.
 
 To try the plugin without installing it: `claude --plugin-dir <this repo>`.

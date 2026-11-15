@@ -1,0 +1,42 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Tool versions
+        run: |
+          bash --version | head -n1
+          git --version
+          jq --version
+          shellcheck --version | sed -n 2p
+          python3 --version
+
+      - name: Lint shell scripts
+        run: shellcheck bin/factory-job tests/run.sh tests/fake-gh/gh statusline/*.sh
+
+      - name: Check plugin manifests
+        run: |
+          jq -e '.name == "factory" and (.version | type == "string")' .claude-plugin/plugin.json
+          jq -e '.name and .owner.name and (.plugins | any(.name == "factory" and .source == "./"))' .claude-plugin/marketplace.json
+          for f in agents/*.md skills/factory/SKILL.md; do
+            head -n1 "$f" | grep -qx -- '---' || { echo "::error file=$f::missing frontmatter"; exit 1; }
+          done
+
+      - name: Guard-script tests
+        run: tests/run.sh
