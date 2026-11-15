@@ -33,8 +33,10 @@ commit it, link to it or rely on it.
 
 1. File contracts (job folder layout, verdict lines, job header) are the
    harness-neutral interface.
-2. Role prompt bodies are harness-neutral. Only frontmatter is
-   Claude-specific.
+2. Agent prompt bodies are harness-neutral: they say "run a shell command" or
+   "read the file", never a harness's tool names. Each body states its tier.
+   Only frontmatter is Claude-specific, and carries the tier's default model
+   and effort. Per-repo tier overrides are applied when the agent is spawned.
 3. The orchestrator skill describes the pipeline neutrally. Claude Code spawn
    and resume mechanics live in `skills/factory/references/claude-code.md`.
 4. Guard scripts use only Bash, `git`, `gh`, `jq` and coreutils: no harness

@@ -126,6 +126,10 @@ Each arrow is a transition made by the guard script. The orchestrator decides
 what to do next from the guard script's output, never by editing state.
 Running out of rounds escalates the job.
 
+One implementer serves a job from its first round to its last. Each new round
+points the same implementer at that round's review reports, so it keeps what
+it learned in earlier rounds instead of starting cold.
+
 The gate runs the checks as defined on the base branch, not the job branch, so
 a branch can't change the checks it's judged by. A change to a protected path
 (CI config, the checks command and the files it runs, as listed in
@@ -176,6 +180,28 @@ Agents never edit labels. An agent records its decision as its verdict, and
 the guard script applies the label. The guard script creates missing labels
 idempotently.
 
+## Commands
+
+What the operator types. The guard script behind each one is described in the
+section linked.
+
+| Command | Does |
+|---|---|
+| `/factory <description>` | Start a job from a description, opening an issue unless the text names an existing one. ([Ingress](#ingress)) |
+| `/factory issue <number \| search text>` | Pull one issue into the factory. ([Ingress](#ingress)) |
+| `/factory run` | Claim and run labelled issues until the queue is empty and every job is finished or parked. ([Ingress](#ingress)) |
+| `/factory run --watch` | As `run`, then keep polling for new issues. |
+| `/factory rework <job> <note>` | Send an escalated job back to its implementer with the operator's note. |
+| `/factory audit` | Check models, run history and config, and recommend changes. ([Self-audit](#self-audit)) |
+| `/factory audit apply` | Apply the latest audit's recommendations. |
+| `/factory board` | Start the board's `localhost` server if needed and print its URL, or the board's file path if no server is available. ([Visibility](#visibility)) |
+| `/factory statusline on \| off` | Add or remove the factory's statusline segment. |
+| `/factory status` | Summarise jobs, warnings and recent outcomes. |
+| `/factory pause \| resume` | Stop or restart the factory (the [kill switch](#limits)). |
+
+The first command run in a repo that hasn't been adopted yet starts
+[adoption](#target-repos).
+
 ## Trust boundary
 
 - **Label provenance.** Issue forms can apply labels automatically, so the
@@ -219,6 +245,31 @@ idempotently.
 - **Resumable.** A restarted orchestrator rebuilds its view from the job
   folders and GitHub, then carries on. Every guard-script command is
   idempotent.
+- **History kept.** Finished job folders are kept; the
+  [self-audit](#self-audit) reads run history from them.
+
+### Settings
+
+Everything in `config.json`. Adoption sets the first group; the rest have
+defaults.
+
+| Key | Meaning | Default |
+|---|---|---|
+| `base_branch` | Branch jobs start from and PRs target. | Detected at adoption |
+| `checks` | The gate's checks command. | Detected at adoption |
+| `protected_paths` | Paths a job may not change without escalating. | CI config and the checks' files |
+| `conventions` | Commit and PR conventions: `default` or `conventional`. | Detected at adoption |
+| `max_parallel_jobs` | Jobs active at once. | Proposed from the plan at adoption |
+| `merge_mode` | What happens after approval. Only `repo` for now. | `repo` |
+| `tiers.<tier>.model`, `tiers.<tier>.effort` | Model and effort per tier. | From the harness reference file |
+| `routing` | Which reviewers a job gets. | Code and security reviewers |
+| `triage_batch` | Issues assessed per triage run. | 10 |
+| `audit_days` | Days before an audit counts as stale. | 30 |
+| `statusline` | Show the factory's statusline segment: `on` or `off`. | `off` |
+| `allow_host` | Allow unattended runs outside a Dev Container. | `false` |
+| `audit.models_seen`, `audit.last_run` | Written by the audit, never set by hand. | — |
+
+Key names are provisional until the guard script is written.
 
 ## Parallel jobs
 
@@ -255,14 +306,45 @@ idempotently.
 These are the harness-neutral interface. Any harness whose agents can read
 and write files can play an agent's part.
 
-- Each agent writes exactly **one report** in its job folder (e.g.
-  `specification.md`, `implementation.md`, `round-1/code-review.md`,
-  `approval.md`) and replies to the orchestrator with one line. Code changes
-  made by the implementer go to the worktree, not the job folder.
+- Each agent writes exactly **one report** in its job folder and replies to
+  the orchestrator with one line. Code changes made by the implementer go to
+  the worktree, not the job folder.
 - Line 1 is a job header identifying the job and agent. Line 2 is the verdict,
   always `VERDICT: <value>`. The guard script parses only those two lines; the
   rest of the report is free-form, for the next agent and the operator.
-- Exact formats are fixed when the guard script is written, and recorded here.
+
+### Job folder
+
+```
+jobs/42-null-title/
+  job.json                 state (guard script)
+  issue.md                 issue snapshot at claim time (guard script)
+  specification.md         specifier
+  implementation.md        implementer; the code itself is in the worktree
+  round-1/
+    gate.md                gate result (guard script)
+    code-review.md         code reviewer
+    security-review.md     security reviewer
+  round-2/ …
+  approval.md              approver
+```
+
+The job id is the issue number and a slug of its title. Its worktree is
+`.worktrees/<job-id>/`.
+
+### Verdicts
+
+| Report | Verdict values | Also carries |
+|---|---|---|
+| `specification.md` | `READY` / `NEEDS-INFO` / `REJECT` | `READY`: change type (for the branch name) and acceptance criteria. `NEEDS-INFO`: the question to post. `REJECT`: the reason. |
+| `implementation.md` | `DONE` / `BLOCKED` | What changed, and how each acceptance criterion was checked. `BLOCKED`: why. |
+| `round-N/*-review.md` | `PASS` / `CHANGES` | `CHANGES`: each requested change. `PASS`: any reservations. |
+| `approval.md` | `APPROVE` / `ESCALATE` | `ESCALATE`: each concern. |
+| `audit.md` | `CURRENT` / `CHANGES-RECOMMENDED` | Each recommendation's evidence, reason and command. |
+
+Fields the guard script reads (such as the change type) use a fixed format.
+The exact header, verdict and field formats are fixed when the guard script is
+written, and recorded here.
 
 ## Target repos
 
@@ -362,10 +444,33 @@ A lightweight kanban board, one card per job:
   reports.
 - **Header.** Running or paused, active jobs against the limit (e.g. 2 / 3),
   and any warnings (audit due, jobs parked).
-- **Opened from disk, updated live.** The board is one static page in
-  `.git/factory/board/`, opened straight from disk with no server and no
-  build step. The guard script rewrites its data file on every transition,
-  and the page picks up the change within a few seconds.
+- **Updated live.** The board is one static page in `.git/factory/board/`,
+  with no build step. The guard script rewrites its data file on every
+  transition, and the page picks up the change within a few seconds.
+- **Works however the repo is mounted.** The operator may work in a local
+  clone, a Dev Container bind-mounted from the host, a container cloned into
+  a volume, Codespaces or a remote host. The board must work in all of them:
+  - **Served on `localhost` (preferred).** `/factory board` starts a small
+    static server for `.git/factory/board/` if one isn't already running,
+    bound to `localhost` only, and prints its URL. VS Code forwards the port
+    from containers and Codespaces automatically.
+  - **Detected, not required.** The server is the first one available of
+    `python3` (standard library only), `node` (inline, no packages) and
+    `busybox httpd`. The factory installs nothing.
+  - **Opened from disk as a fallback.** If none is available, `/factory
+    board` prints the `file://` path and says what to install for the server.
+    Opening from disk works only where the browser can see the files (a
+    local clone or a bind mount).
+  - **The page says when it's in fallback mode.** Opened from disk, the board
+    shows a small, dismissible note: it's running without a server, and
+    updates may be less smooth. The note gives the commands to fix that:
+    install one of the servers (e.g. `sudo apt-get install -y python3`), then
+    run `/factory board` and open the URL it prints.
+- **Why the data file is JavaScript.** Browsers block `fetch` for pages
+  opened from `file://`, but they still load `<script>` tags. So the data file
+  is a script that sets one variable, and the page re-loads it by adding a
+  fresh `<script>` tag. That one mechanism works both served and from disk.
+  Don't turn it into JSON read with `fetch`: that breaks the fallback.
 - **Safe.** Issue titles and report text are untrusted, so the page renders
   them only as text, never as HTML.
 
