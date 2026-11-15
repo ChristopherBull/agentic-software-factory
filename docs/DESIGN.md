@@ -18,7 +18,7 @@ Humans are involved only to:
   untrusted issue text can't pull itself into the pipeline;
 - answer a `factory:needs-info` question on the issue;
 - review an escalated PR (`factory:needs-human`);
-- merge, through the repo's own PR process.
+- approve or merge a PR where the repo's own settings require a human.
 
 Everything else is the factory's call:
 
@@ -41,7 +41,8 @@ Everything else is the factory's call:
 | Operator | The person running the factory. Has write access to the target repo. |
 | Target repo | The repo the factory is working on. |
 | Job | One unit of work (one issue or one prompt) moving through the pipeline. |
-| Role | An agent with one job in the pipeline: triager, intake, spec writer, builder, reviewer, approver. |
+| Stage | A step in the pipeline: claim, specify, implement, verify, deliver. |
+| Role | An agent with one task: triager, specifier, implementer, reviewer, approver, or (outside the pipeline) auditor. |
 | Orchestrator | The `/factory` skill. Spawns roles and calls guard scripts. |
 | Guard script | A Bash script in `bin/`. The only writer of job state. |
 | Job folder | Per-job directory holding the job state and every role's report. |
@@ -54,11 +55,19 @@ Everything else is the factory's call:
 ## Pipeline
 
 ```
-ingress → intake → spec writer → builder → gate ─fail→ builder
-        → reviewers ─changes→ builder        (max 3 rounds)
-        → PR → CI ─fail→ builder
-        → approver → ESCALATE (default) | merge (if enabled)
+ingress → claim → specify → implement → verify ─changes→ implement
+                                          (max 3 rounds)
+        → deliver: PR → CI ─fail→ implement
+                   → approver → APPROVE (default) → merge | ESCALATE (concerns)
 ```
+
+| Stage | Done by | What happens |
+|---|---|---|
+| Claim | Guard script | Mechanical, no judgement: verify the label, lock the issue, snapshot it, create the job. |
+| Specify | Specifier (agent) | Judgement: decide whether the work can go ahead (`READY`, `NEEDS-INFO` or `REJECT`) and, if so, write the specification. |
+| Implement | Implementer (agent) | Change the code in the job's worktree until the specification's acceptance criteria are met. |
+| Verify | Gate (guard script), then reviewers (agents, in parallel) | The gate runs the repo's checks; reviewers judge the diff against the specification. |
+| Deliver | Guard script and approver (agent) | Open the PR, decide `APPROVE` or `ESCALATE`, then merge according to the [merge mode](#delivery). |
 
 Each arrow is a transition made by a guard script. The orchestrator decides
 what to do next from the guard script's output, never by editing state.
@@ -72,33 +81,49 @@ a branch can't change the checks it's judged by. A change to a protected path
 
 ## Ingress
 
-Work enters in one of three ways.
+Work enters in one of four ways.
 
 1. **Skill prompt.** The operator runs `/factory <description>`. The text is
    trusted operator input. The factory creates a job directly, and opens a
    tracking issue if the repo uses issues.
-2. **Labelled issues.** `/factory run` claims open issues labelled `factory`
+2. **Named issue.** The operator runs `/factory issue <number | search text>`.
+   A number selects that issue. Text searches open issues: one match is taken,
+   several are listed and nothing is claimed. Naming an issue is the
+   operator's decision to let the factory pull it, so a guard script applies
+   `factory` on the operator's behalf, then claims it.
+3. **Labelled issues.** `/factory run` claims open issues labelled `factory`
    that are not already claimed, and runs until the queue is empty and every
    job is finished or parked. `/factory run --watch` then keeps polling for
    new issues. Each issue is verified (see
    [Trust boundary](#trust-boundary)), claimed, then queued.
-3. **Triage (optional).** The triager reads unlabelled open issues and judges
-   whether each is a good fit: small, well scoped, testable. For a good fit it
-   comments with its reasoning and adds `factory:candidate`. It **never**
-   applies `factory`; a maintainer does that.
+4. **Triage (optional).** The triager reads open issues that carry no
+   `factory*` label and judges whether each is a good fit: small, well scoped,
+   testable. Every issue it assesses gets an outcome label and a comment with
+   its reasoning, so no issue is triaged twice:
+   - a good fit gets `factory:candidate`, awaiting a maintainer;
+   - anything that needs a person (too large, vague, risky or contentious)
+     gets `factory:not-candidate`.
+
+   The triager **never** applies `factory`; a maintainer does that. It skips
+   any issue that already has a `factory*` label, so a maintainer re-triages
+   an issue by removing its outcome label. Each run assesses at most
+   `triage_batch` issues (default 10), oldest first.
 
 ### Labels
 
 | Label | Set by | Meaning |
 |---|---|---|
-| `factory` | Maintainer | Build this. |
+| `factory` | Maintainer, or a guard script for an operator-named issue | Build this. |
 | `factory:candidate` | Triager | Proposed for the factory; awaiting a maintainer. |
+| `factory:not-candidate` | Triager | Assessed and left for a person; not re-triaged unless the label is removed. |
 | `factory:in-progress` | Guard script | Claimed by a running factory. |
-| `factory:needs-info` | Intake | Question asked on the issue; job parked. |
+| `factory:needs-info` | Specifier | Question asked on the issue; job parked. |
 | `factory:needs-human` | Guard script | Escalated; needs the operator. |
 | `factory:speckit` | Maintainer | Lane 2: build from a committed spec-kit spec. |
 
-Guard scripts create missing labels idempotently.
+"Set by" names who decides. Where that is a role, the role records the
+decision as its verdict and a guard script applies the label; roles never
+edit labels themselves. Guard scripts create missing labels idempotently.
 
 ## Trust boundary
 
@@ -112,10 +137,11 @@ Guard scripts create missing labels idempotently.
   example, answers to `factory:needs-info`).
 - **Quoted data.** Roles that read `issue.md` treat it as data to analyse,
   never as instructions to follow.
-- **Spec writer is the boundary.** The spec writer is the last role to read
-  the issue. It writes `spec.md` in its own words and has no push access.
-- **Builder isolation.** The builder reads `spec.md` and the target repo,
-  never `issue.md`.
+- **The specifier is the boundary.** The specifier is the last role to read
+  the issue. It writes `specification.md` in its own words and has no push
+  access.
+- **Implementer isolation.** The implementer reads `specification.md` and the
+  target repo, never `issue.md`.
 
 ## State
 
@@ -126,7 +152,9 @@ Guard scripts create missing labels idempotently.
   ```
   .git/factory/
     config.json          per-repo config (checks command, merge mode, commit
-                         and PR conventions, tiers, parallel limit, limits)
+                         and PR conventions, tiers, parallel limit, limits,
+                         model ids seen at the last audit)
+    audit.md             latest self-audit and its recommendations
     PAUSED               kill switch (presence = paused)
     jobs/<job-id>/       one job folder per job
   ```
@@ -167,27 +195,28 @@ Guard scripts create missing labels idempotently.
   Setting it back to `auto` restores detection. The plan is re-detected on
   every run, so a plan change takes effect without reconfiguring.
 - **Isolation.** Each job has its own worktree, branch, job folder and
-  builder. Roles from different jobs never share context. Guard scripts lock
-  per job for job state, plus one repo-wide lock for claims and the limit.
+  implementer. Roles from different jobs never share context. Guard scripts
+  lock per job for job state, plus one repo-wide lock for claims and the
+  limit.
 - **No blocking.** The orchestrator runs roles in the background. When any
   role finishes, it advances that job and starts the next queued job if a
   slot is free.
-- **Overlap.** `spec.md` lists the paths the change expects to touch. A job
-  whose paths overlap an active job's waits until that job's PR is ready, so
-  two jobs never edit the same files at once.
+- **Overlap.** `specification.md` lists the paths the change expects to
+  touch. A job whose paths overlap an active job's waits until that job's PR
+  is ready, so two jobs never edit the same files at once.
 - **Base drift.** Before opening the PR, a guard script rebases the branch
-  onto the latest base and re-runs the gate. A conflict goes back to the
-  builder once, then escalates.
+  onto the latest base and re-runs the gate. A conflict returns to the
+  implementer once, then escalates.
 
 ## File contracts
 
 These are the harness-neutral interface. Any harness whose agents can read
 and write files can play a role.
 
-- Each role writes exactly **one report** in its job folder (e.g. `intake.md`,
-  `spec.md`, `review-code.md`, `approval.md`) and replies to the orchestrator
-  with one line. Code changes made by the builder go to the worktree, not the
-  job folder.
+- Each role writes exactly **one report** in its job folder (e.g.
+  `specification.md`, `implementation.md`, `round-1/code-review.md`,
+  `approval.md`) and replies to the orchestrator with one line. Code changes
+  made by the implementer go to the worktree, not the job folder.
 - Line 1 is the job header; line 2 is the verdict line. Guard scripts parse
   only those two lines. The rest of the report is free-form for the next role
   and the operator.
@@ -196,13 +225,13 @@ and write files can play a role.
 
 ## Lanes
 
-- **Lane 1 (default).** Intake → spec writer → build. For small, well-scoped
+- **Lane 1 (default).** Claim → specify → implement. For small, well-scoped
   work.
 - **Lane 2 (spec-kit).** For larger features. The operator writes and commits
   the spec interactively with spec-kit, then labels an issue `factory` and
-  `factory:speckit`, pointing at the spec directory. The factory skips intake
-  and the spec writer. The approver always escalates in this lane. The factory
-  never runs `specify init` or `specify`.
+  `factory:speckit`, pointing at the spec directory. The factory skips the
+  specify stage. The approver always escalates in this lane. The factory never
+  runs `specify init` or `specify`.
 
 ## Target repos
 
@@ -212,10 +241,10 @@ and write files can play a role.
 - **Branches.** Names follow the target repo's own convention, read from its
   `AGENTS.md` or contributing docs. The default is
   `<type>/<issue-number>-<slug>` (e.g. `fix/42-null-title`), where `<type>` is
-  the change type (`feat`, `fix`, …) recorded in `spec.md`. The branch is
-  created after the spec is written, so the type is known. A prompt job with
-  no tracking issue uses `<type>/<slug>`. Never use a `factory/` prefix or a
-  name that matches a release branch pattern.
+  the change type (`feat`, `fix`, …) recorded in `specification.md`. The
+  branch is created after the specify stage, so the type is known. A prompt
+  job with no tracking issue uses `<type>/<slug>`. Never use a `factory/`
+  prefix or a name that matches a release branch pattern.
 - **Commit and PR conventions.** Set per repo in `config.json`:
 
   | Key | Values |
@@ -241,17 +270,25 @@ and write files can play a role.
 
 ## Delivery
 
-- The approver's default verdict is `ESCALATE`: the PR is marked ready and
-  labelled `factory:needs-human`.
-- By default the factory never merges. An approved PR is merged through the
-  repo's own PR process (a maintainer, a merge queue or GitHub auto-merge), so
-  its branch protection and required checks decide.
-- The operator can override this by setting the merge mode to `gh`
-  (`factory-job config set merge gh`), optionally limited to low-risk changes. The factory then
-  merges approved PRs itself with `gh pr merge`, which still respects branch
-  protection.
+- The approver's default verdict is `APPROVE` once every review has passed.
+  It escalates only when it has a concrete concern, such as a risky area
+  (authentication, data migrations, payments), a specification it isn't
+  confident in, or a reviewer's pass that came with reservations. It names
+  each concern in `approval.md`.
+- On `ESCALATE`, the PR is marked ready, labelled `factory:needs-human`, and
+  never merged automatically.
+- On `APPROVE`, the PR is marked ready and merged according to `merge_mode`
+  in `config.json`:
+
+  | Key | Values |
+  |---|---|
+  | `merge_mode` | `repo` (default): the factory makes no merge call and changes no merge setting. The PR is merged however the repo already works: by a maintainer, a merge queue, or automation the repo itself has set up.<br>`auto-merge`: the factory turns on GitHub auto-merge for the approved PR, so it merges once the repo's branch protection, required checks and required reviews are satisfied. If the repo doesn't allow auto-merge, the PR falls back to `repo` behaviour.<br>`factory`: the factory merges the PR itself with `gh pr merge` once it is fully resolved: approved, CI green and every review comment addressed. Branch protection still applies. |
+
+  Only the operator can choose `auto-merge` or `factory`, explicitly (e.g.
+  `factory-job config set merge_mode auto-merge`). The factory never changes
+  the merge mode itself.
 - After the PR opens, the factory watches GitHub CI. Failures go back to the
-  builder in one batch per round.
+  implementer in one batch per round.
 
 ## Limits
 
@@ -288,14 +325,47 @@ This never stops work:
 
 Roles are routed by tier, not by model id:
 
-| Tier | Claude Code default | Used for |
+| Tier | Means | Used for |
 |---|---|---|
-| `strong` | Claude Opus 5.5 at `high` effort. Claude Fable 5.2 at `high` is an opt-in (about twice the cost). | Intake, spec writer, builder, security reviewer, approver |
-| `cheap` | Claude Sonnet 5.5 at `medium` effort. | Code, UX and UI reviewers |
+| `strong` | A high-quality model at high effort. | Specifier, implementer, security reviewer, approver |
+| `cheap` | A medium-quality model at medium effort. | Triager; code, UX and UI reviewers |
 
 Each tier's model and effort can be overridden per repo (e.g.
-`factory-job config set tiers.strong.model fable`). Each harness's reference
-file maps tiers to that harness's models. Reviewers are chosen by risk and by
+`factory-job config set tiers.strong.model <model>`). Each harness's reference
+file maps tiers to concrete models and effort levels for that harness. Reviewers are chosen by risk and by
 which areas of the code the change touches; the routing table lives in
 `config.json`, not in prompts. The reviewers in a round run in parallel, and
 the round is complete only when every routed reviewer has written its report.
+
+## Self-audit
+
+The factory periodically checks its own setup. It recommends and warns, but
+the operator decides.
+
+- **Audit.** `/factory audit` runs the auditor (`strong`). It writes
+  `.git/factory/audit.md` with the verdict line `AUDIT: CURRENT` or
+  `AUDIT: CHANGES-RECOMMENDED`. It covers three areas:
+  - **Models:** the models currently available through the harness, compared
+    with the tier mapping and effort levels in use.
+  - **Run history:** job outcomes since the last audit, from the job folders.
+    That means escalation and rejection rates and their reasons, review and
+    CI rounds used, gate failures, overlap waits and usage-limit parking. The
+    auditor recommends changes to tiers, reviewer routing, round limits or
+    `max_parallel_jobs` where the history supports them.
+  - **Config drift:** whether `config.json` still matches the repo: the
+    checks command still passes on base, protected paths still exist, and
+    the commit and PR conventions haven't changed.
+
+  For each recommendation it gives the evidence, the reason, and the exact
+  `factory-job config set` command.
+- **Apply.** `/factory audit apply` applies the latest audit's
+  recommendations through the guard script. Nothing changes until the
+  operator runs it; the auditor never edits `config.json`.
+- **Warn.** At the start of every run the harness layer passes the list of
+  available model ids to the guard script. The guard script warns, through
+  `factory-job status` and at the start of each run, when there are model ids
+  it didn't see at the last audit, or when the last audit is older than
+  `audit_days` (default 30). This check needs no model and costs no tokens.
+- **Never blocking.** Like cost reporting, the audit is advisory. A failure
+  to list models or read history is logged, and work carries on with the
+  current config.
