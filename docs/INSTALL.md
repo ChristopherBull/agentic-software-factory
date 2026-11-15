@@ -64,14 +64,32 @@ most repos, and "per project" if you use it in a few.
 
 ## Running unattended
 
-Start Claude Code in the container so nothing prompts mid-run:
+Start Claude Code in the container in **auto mode**, where a classifier
+reviews each action instead of prompting you:
 
 ```
-claude --permission-mode bypassPermissions
+claude --permission-mode auto
 ```
 
-This is for isolated containers only, run as a non-root user. See
-`skills/factory/references/claude-code.md` for details and the alternatives.
+Auto mode can't be set from a project's settings, so pass the flag, or set
+`"permissions": {"defaultMode": "auto"}` in the container's
+`~/.claude/settings.json`.
+
+If something interrupts a run (a prompt, or an action auto mode denies, which
+usually surfaces as an escalated or parked job), tune the permissions rather
+than loosening them wholesale:
+
+1. Find what was blocked: the prompt itself, or the job's history on the
+   board.
+2. If it's something the factory should always be allowed to do, add a narrow
+   rule to `permissions.allow` in the container's `~/.claude/settings.json`,
+   e.g. `"Bash(git -C * push *)"`. If it should never happen, add it to
+   `permissions.deny`.
+3. Run again, and repeat until runs finish without interruptions.
+
+`bypassPermissions` skips all of this, but it removes every check. Keep it as
+a last resort for a fully isolated, disposable container, run as a non-root
+user. See `skills/factory/references/claude-code.md` for details.
 
 ## First run
 
