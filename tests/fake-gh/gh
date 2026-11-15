@@ -1,0 +1,108 @@
+#!/usr/bin/env bash
+# A fake `gh` for the guard-script tests. It keeps GitHub's state in
+# $FAKE_GH/state.json, logs every call to $FAKE_GH/calls.log, and supports
+# only the invocations bin/factory-job makes. Unknown calls fail loudly.
+set -euo pipefail
+
+STATE="$FAKE_GH/state.json"
+printf '%s\n' "$*" >>"$FAKE_GH/calls.log"
+
+jqexpr="" args=()
+while (($#)); do
+  case $1 in
+    --jq | -q) jqexpr=$2; shift 2 ;;
+    *) args+=("$1"); shift ;;
+  esac
+done
+set -- "${args[@]}"
+
+save() { local t; t="$(mktemp)"; jq "$@" "$STATE" >"$t" && mv "$t" "$STATE"; }
+emit() { if [[ -n $jqexpr ]]; then jq -r "$jqexpr"; else cat; fi; }
+opt() { # opt <name> <args...>: value after --name
+  local name=$1; shift
+  while (($#)); do [[ $1 == "$name" ]] && { printf '%s' "$2"; return; }; shift; done
+}
+now() { date -u +%Y-%m-%dT%H:%M:%SZ; }
+repo() { jq -r .repo "$STATE"; }
+issue_json() { # GitHub's shape: labels as objects
+  jq --arg n "$1" '.issues[$n] | select(. != null) | . + {labels: [.labels[] | {name: .}],
+    url: ("https://github.com/" + $ENV.REPO + "/issues/" + $n)}' "$STATE"
+}
+export REPO
+REPO="$(repo)"
+
+case "$1 ${2:-}" in
+  "repo view")
+    jq '{nameWithOwner: .repo, defaultBranchRef: {name: .default_branch}}' "$STATE" | emit ;;
+  "issue view")
+    out="$(issue_json "$3")"
+    [[ -n $out ]] || { echo "no issue $3" >&2; exit 1; }
+    emit <<<"$out" ;;
+  "issue list")
+    label="$(opt --label "$@")"
+    search="$(opt --search "$@")"
+    search="${search% in:title,body}"
+    jq --arg l "$label" --arg s "$search" '[.issues | to_entries[] | .value
+      | select(.state == "OPEN")
+      | select($l == "" or (.labels | index($l)))
+      | select($s == "" or ((.title + " " + .body) | ascii_downcase | contains($s | ascii_downcase)))
+      | . + {labels: [.labels[] | {name: .}]}]' "$STATE" | emit ;;
+  "issue create")
+    n="$(jq '.next' "$STATE")"
+    title="$(opt --title "$@")"
+    body="$(cat "$(opt --body-file "$@")")"
+    save --arg n "$n" --arg t "$title" --arg b "$body" --arg now "$(now)" '.next += 1 |
+      .issues[$n] = {number: ($n | tonumber), title: $t, body: $b, state: "OPEN", labels: [],
+        comments: [], timeline: [], createdAt: $now}'
+    echo "https://github.com/$REPO/issues/$n" ;;
+  "issue edit")
+    n=$3 add="$(opt --add-label "$@")" rm="$(opt --remove-label "$@")"
+    [[ $(jq --arg n "$n" '.issues[$n] != null' "$STATE") == true ]] || { echo "no issue $n" >&2; exit 1; }
+    if [[ -n $add ]]; then
+      save --arg n "$n" --arg l "$add" --arg u "$(jq -r .user "$STATE")" '
+        if (.issues[$n].labels | index($l)) then . else
+        .issues[$n].labels += [$l] | .issues[$n].timeline += [{event: "labeled", label: {name: $l}, actor: {login: $u}}] end'
+    fi
+    [[ -n $rm ]] && save --arg n "$n" --arg l "$rm" '.issues[$n].labels -= [$l]'
+    true ;;
+  "issue comment")
+    body="$(cat "$(opt --body-file "$@")")"
+    save --arg n "$3" --arg b "$body" --arg now "$(now)" '.issues[$n].comments += [{author: {login: .user}, body: $b, createdAt: $now}]' ;;
+  "label create")
+    save --arg l "$3" '.labels = ((.labels + [$l]) | unique)' ;;
+  "pr create")
+    n="$(jq '.next' "$STATE")"
+    save --arg n "$n" --arg t "$(opt --title "$@")" --arg b "$(cat "$(opt --body-file "$@")")" \
+      --arg h "$(opt --head "$@")" --arg base "$(opt --base "$@")" '.next += 1 |
+      .prs[$n] = {number: ($n | tonumber), title: $t, body: $b, head: $h, base: $base,
+        draft: true, state: "OPEN", labels: []}'
+    echo "https://github.com/$REPO/pull/$n" ;;
+  "pr view")
+    out="$(jq --arg k "$3" '[.prs[] | select((.number | tostring) == $k or .head == $k)][0]
+      | select(. != null) | . + {url: ("https://github.com/" + $ENV.REPO + "/pull/" + (.number | tostring))}' "$STATE")"
+    [[ -n $out ]] || { echo "no pull requests found for $3" >&2; exit 1; }
+    emit <<<"$out" ;;
+  "pr ready")
+    save --arg n "$3" '.prs[$n].draft = false' ;;
+  "pr edit")
+    add="$(opt --add-label "$@")" rm="$(opt --remove-label "$@")"
+    [[ -n $add ]] && save --arg n "$3" --arg l "$add" '.prs[$n].labels = ((.prs[$n].labels + [$l]) | unique)'
+    [[ -n $rm ]] && save --arg n "$3" --arg l "$rm" '.prs[$n].labels -= [$l]'
+    true ;;
+  "pr merge")
+    echo "fake gh: the factory must never merge" >&2
+    exit 99 ;;
+  "api "*)
+    path=""
+    for a in "${@:2}"; do [[ $a == repos/* ]] && path=$a; done
+    if [[ $path =~ ^repos/[^/]+/[^/]+/issues/([0-9]+)/timeline$ ]]; then
+      jq --arg n "${BASH_REMATCH[1]}" '.issues[$n].timeline // []' "$STATE" | emit
+    elif [[ $path =~ ^repos/[^/]+/[^/]+/collaborators/([^/]+)/permission$ ]]; then
+      jq --arg u "${BASH_REMATCH[1]}" '{permission: (.permissions[$u] // "none"), role_name: (.permissions[$u] // "none")}' "$STATE" | emit
+    else
+      echo "fake gh: unsupported api path: $path" >&2; exit 98
+    fi ;;
+  *)
+    echo "fake gh: unsupported call: $*" >&2
+    exit 97 ;;
+esac
