@@ -87,7 +87,7 @@ review_all() { # review_all <job> <round> <code verdict> <security verdict>
   fj advance "$1" reviewer-security >/dev/null
 }
 
-first_job() { basename "$(dirname "$(ls .git/factory/jobs/*/job.json | head -n1)")"; }
+first_job() { local f=(.git/factory/jobs/*/job.json); basename "$(dirname "${f[0]}")"; }
 job_for() { basename "$(dirname "$(grep -l "\"issue\": $1," .git/factory/jobs/*/job.json)")"; }
 
 ok() { :; }
@@ -551,8 +551,8 @@ test_board_serve_starts_once_and_serves_the_board() {
   contains "$out" "BOARD: http://127.0.0.1:"
   url="$(sed -n 's/^BOARD: \(http[^ ]*\).*/\1/p' <<<"$out")"
   pid="$(jq -r .pid .git/factory/board/server.json)"
-  local i
-  for i in $(seq 1 30); do curl -fs "${url}data.js" >/dev/null && break; sleep 0.1; done
+  local _
+  for _ in $(seq 1 30); do curl -fs "${url}data.js" >/dev/null && break; sleep 0.1; done
   contains "$(curl -fs "${url}data.js")" "window.FACTORY_BOARD"
   contains "$(curl -fs "$url")" "Factory board"
   eq "$(fj board serve)" "BOARD: $url" "a second call reuses the server"

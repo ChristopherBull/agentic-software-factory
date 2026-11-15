@@ -14,6 +14,7 @@ original="$(jq -r '.original.command // empty' "$RECORD" 2>/dev/null)"
 fj="$(jq -r '.factory_job // empty' "$RECORD" 2>/dev/null)"
 if [[ ! -x $fj ]]; then
   # Plugin updates move the install directory; use the newest installed copy.
+  # shellcheck disable=SC2012 # ls -t is the simplest way to sort by age here
   fj="$(ls -t "${CLAUDE_CONFIG_DIR:-$HOME/.claude}"/plugins/cache/*/factory/*/bin/factory-job 2>/dev/null | head -n1)"
 fi
 

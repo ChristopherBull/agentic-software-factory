@@ -122,8 +122,8 @@ LOCK_HELD=0
 lock() {
   [[ $LOCK_HELD == 1 ]] && return 0
   mkdir -p "$FACTORY_DIR"
-  local dir="$FACTORY_DIR/.lock" i
-  for i in $(seq 1 200); do
+  local dir="$FACTORY_DIR/.lock" _
+  for _ in $(seq 1 200); do
     if mkdir "$dir" 2>/dev/null; then
       echo $$ >"$dir/pid"
       LOCK_HELD=1
@@ -980,7 +980,7 @@ column_of() {
     queued) echo queued ;;
     specify | implement | verify | deliver) echo in-progress ;;
     needs-info | escalated | approved) echo human-review ;;
-    *) echo done ;;
+    *) echo "done" ;;
   esac
 }
 

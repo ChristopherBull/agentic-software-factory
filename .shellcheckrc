@@ -1,0 +1,3 @@
+# jq programs and Markdown snippets are single-quoted on purpose: their $vars
+# and backticks belong to jq or the text, not to the shell.
+disable=SC2016
