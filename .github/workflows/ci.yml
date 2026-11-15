@@ -28,7 +28,7 @@ jobs:
           python3 --version
 
       - name: Lint shell scripts
-        run: shellcheck bin/factory-job tests/run.sh tests/fake-gh/gh statusline/*.sh
+        run: shellcheck bin/factory-job tests/run.sh tests/fake-gh/gh statusline/*.sh .devcontainer/*.sh
 
       - name: Check plugin manifests
         run: |

@@ -1,0 +1,27 @@
+{
+  // Dev Container for working on (and dogfooding) the factory.
+  // Open with any tool that supports the Dev Containers spec, e.g. the
+  // devcontainer CLI, DevPod, VS Code or Codespaces. See docs/INSTALL.md.
+  "name": "agentic-software-factory",
+  "image": "mcr.microsoft.com/devcontainers/base:ubuntu",
+  "features": {
+    "ghcr.io/devcontainers/features/github-cli:1": {}
+  },
+  // A non-root user, as Claude Code's unattended modes require.
+  "remoteUser": "vscode",
+  "postCreateCommand": "bash .devcontainer/post-create.sh",
+  // Keep Claude Code's login and settings across container rebuilds,
+  // without sharing the host's ~/.claude.
+  "mounts": [
+    "source=factory-claude-${devcontainerId},target=/home/vscode/.claude,type=volume"
+  ],
+  // Pass a GitHub token in from the host instead of storing one in the container.
+  "remoteEnv": {
+    "GH_TOKEN": "${localEnv:GH_TOKEN}"
+  },
+  // The factory's board server.
+  "forwardPorts": [4173],
+  "portsAttributes": {
+    "4173": { "label": "Factory board", "onAutoForward": "notify" }
+  }
+}

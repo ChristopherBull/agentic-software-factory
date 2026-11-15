@@ -261,7 +261,7 @@ defaults.
 | `repo` | The GitHub repo, `owner/name`. | Detected at adoption |
 | `base_branch` | Branch jobs start from and PRs target. | Detected at adoption |
 | `checks` | The gate's checks command. | Detected at adoption |
-| `protected_paths` | Globs a job may not change without escalating. | CI config and the checks' files |
+| `protected_paths` | Globs a job may not change without escalating. | CI config, the checks' files and `.devcontainer/*`; when the factory works on itself, also its guard script and plugin manifests |
 | `conventions` | Commit and PR conventions: `default` or `conventional`. | `default` |
 | `max_parallel_jobs` | Jobs active at once. | Proposed from the plan at adoption |
 | `merge_mode` | What happens after approval. Only `repo` for now. | `repo` |

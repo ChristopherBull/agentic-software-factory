@@ -18,6 +18,8 @@ end against a real GitHub repo. Everything under Future in
 
 ```
 .claude-plugin/        plugin and marketplace manifests
+.devcontainer/         Dev Container for working on and dogfooding the factory
+.github/workflows/     CI
 skills/factory/        orchestrator skill (/factory)
   references/          harness-specific mechanics (claude-code.md)
 agents/                one prompt per role
@@ -68,7 +70,7 @@ the tests.
 ```
 tests/run.sh                 # all guard-script tests
 tests/run.sh <pattern>       # tests whose names contain <pattern>
-shellcheck bin/factory-job tests/run.sh tests/fake-gh/gh statusline/*.sh
+shellcheck bin/factory-job tests/run.sh tests/fake-gh/gh statusline/*.sh .devcontainer/*.sh
 ```
 
 CI (`.github/workflows/ci.yml`) runs shellcheck, checks the plugin manifests
