@@ -1,0 +1,10 @@
+{
+  "name": "factory",
+  "version": "0.1.0",
+  "description": "Agentic software factory: GitHub issues in, reviewed pull requests out, mostly unattended.",
+  "author": { "name": "Christopher Bull" },
+  "homepage": "https://github.com/ChristopherBull/agentic-software-factory",
+  "repository": "https://github.com/ChristopherBull/agentic-software-factory",
+  "license": "MIT",
+  "keywords": ["factory", "agents", "github", "automation", "pull-requests"]
+}

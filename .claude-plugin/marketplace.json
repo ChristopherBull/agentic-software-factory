@@ -1,0 +1,12 @@
+{
+  "name": "agentic-software-factory",
+  "owner": { "name": "Christopher Bull" },
+  "description": "The agentic software factory plugin.",
+  "plugins": [
+    {
+      "name": "factory",
+      "source": "./",
+      "description": "Agentic software factory: GitHub issues in, reviewed pull requests out, mostly unattended."
+    }
+  ]
+}
