@@ -18,6 +18,9 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
+        with:
+          # CI never pushes, so don't leave the token in .git/config.
+          persist-credentials: false
 
       - name: Tool versions
         run: |
