@@ -193,6 +193,14 @@ test_new_opens_one_issue_and_claims_it() {
   check grep -q "Quoted issue data" ".git/factory/jobs/$id/issue.md"
 }
 
+test_new_shortens_long_titles_at_a_word() {
+  adopt
+  fj new "Make greet.sh accept an optional name argument: \"./greet.sh Ada\" prints \"hello Ada\"" >/dev/null
+  eq "$(state '.issues["1"].title')" "Make greet.sh accept an optional name argument: \"./greet.sh Ada\"…"
+  fj new "Short title" >/dev/null
+  eq "$(state '.issues["2"].title')" "Short title"
+}
+
 test_new_with_issue_number_opens_nothing() {
   adopt
   local n

@@ -869,7 +869,12 @@ new_cmd() { # new <text>: open an issue unless the text names one
     issue_cmd "$text"
     return
   fi
-  title="$(head -n1 <<<"$text" | cut -c1-72)"
+  title="$(head -n1 <<<"$text")"
+  # cut -c counts bytes, so it could split a word or a UTF-8 character.
+  if ((${#title} > 72)); then
+    title="${title:0:71}"
+    title="${title% *}…"
+  fi
   f="$(mktemp)"
   printf '%s\n\n---\n🏭 Opened by the factory from an operator prompt.\n' "$text" >"$f"
   url="$(gh issue create --title "$title" --body-file "$f")"
