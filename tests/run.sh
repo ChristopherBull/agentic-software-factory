@@ -342,6 +342,22 @@ test_round_limit_escalates() {
   contains "$(state '.issues["1"].comments[-1].body')" "Round limit reached"
 }
 
+test_gate_fails_a_dirty_worktree() {
+  adopt
+  seed_issue "Dirty" maint >/dev/null
+  fj pull >/dev/null
+  local id
+  id="$(first_job)"
+  specify_ready "$id"
+  implement "$id" 1
+  chmod +x ".worktrees/$id/app.txt"
+  fj advance "$id" implementer >/dev/null
+  contains "$(fj gate "$id")" "GATE: FAIL"
+  check grep -q "uncommitted changes" ".git/factory/jobs/$id/round-1/gate.md"
+  check grep -q "app.txt" ".git/factory/jobs/$id/round-1/gate.md"
+  eq "$(stage "$id")" implement
+}
+
 test_protected_paths_escalate() {
   adopt
   seed_issue "Sneaky" maint >/dev/null

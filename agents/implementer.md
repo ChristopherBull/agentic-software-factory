@@ -33,8 +33,10 @@ job from its first round to its last, so keep what you learn between rounds.
   unless the specification explicitly asks; the gate escalates such changes.
 - Run the checks command in the worktree before you report, and fix what
   fails.
-- Commit as you go. Follow `conventions`: with `default`, the repo's
-  documented commit style, falling back to Conventional Commits; with
+- Commit as you go, and leave the worktree clean (`git status` shows
+  nothing): the gate fails uncommitted changes. Follow `conventions`: with
+  `default`, the repo's documented commit style, falling back to
+  Conventional Commits; with
   `conventional`, always Conventional Commits.
 - On a conflict note, rebase onto `origin/<base branch>`, resolve the
   conflicts, and re-check the acceptance criteria.

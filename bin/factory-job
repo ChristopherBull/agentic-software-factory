@@ -400,7 +400,7 @@ start_jobs() { # start queued jobs while slots are free
 }
 
 run_gate() { # run_gate <job>: writes round-N/gate.md, prints PASS or FAIL or PROTECTED
-  local id=$1 round wt out base changed pattern hit="" status=PASS file checks
+  local id=$1 round wt out base changed pattern hit="" status=PASS file checks dirty
   round="$(jget "$id" round)"
   wt="$WORKTREES/$id"
   base="$(cfg base_branch main)"
@@ -415,9 +415,15 @@ run_gate() { # run_gate <job>: writes round-N/gate.md, prints PASS or FAIL or PR
     done <<<"$changed"
   done < <(jq -r '.[]' <<<"$(cfg protected_paths '[]')")
   checks="$(cfg checks)"
+  # The checks run on the working tree but only commits are pushed, so a dirty
+  # tree (including a file mode change) could pass checks the PR would fail.
+  dirty="$(git -C "$wt" status --porcelain 2>&1)"
   if [[ -n $hit ]]; then
     status=PROTECTED
     out="Changed protected paths: $hit"
+  elif [[ -n $dirty ]]; then
+    status=FAIL
+    out="$(printf 'The worktree has uncommitted changes. Commit or discard them; only commits reach the PR.\n%s' "$dirty")"
   elif [[ -z $checks ]]; then
     out="No checks command configured; nothing to run."
   elif out="$(cd "$wt" && timeout "$(cfg gate_timeout 1800)" bash -c "$checks" 2>&1)"; then

@@ -133,7 +133,9 @@ it learned in earlier rounds instead of starting cold.
 The gate runs the checks as defined on the base branch, not the job branch, so
 a branch can't change the checks it's judged by. A change to a protected path
 (CI config, the checks command and the files it runs, as listed in
-`config.json`) fails the gate and escalates.
+`config.json`) fails the gate and escalates. Uncommitted changes in the
+worktree, including file mode changes, fail the gate before the checks run:
+only commits reach the PR, so the checks must judge exactly what's committed.
 
 ## Ingress
 
