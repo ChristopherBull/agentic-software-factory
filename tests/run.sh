@@ -525,6 +525,7 @@ test_rework_returns_an_escalated_job() {
   eq "$(stage "$id")" implement
   eq "$(job "$id" .round)" 2
   check grep -q "Use the v2 API." ".git/factory/jobs/$id/round-2/rework.md"
+  eq "$(fj audit summary | jq '.escalations | length')" 1 "a reworked escalation still counts"
   not grep -q "factory:needs-human" <(state '.issues["1"].labels | join(",")')
 }
 

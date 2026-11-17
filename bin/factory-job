@@ -965,7 +965,7 @@ audit_summary() { # outcomes since the last audit, for the auditor
       since: $since,
       jobs: ($jobs | length),
       by_stage: ($jobs | group_by(.stage) | map({(.[0].stage): length}) | add // {}),
-      escalations: [$jobs[] | select(.escalation != null) | {id, reason: .escalation}],
+      escalations: [$jobs[] | .id as $id | .history[] | select(.to == "escalated") | {id: $id, reason: .why}],
       rounds_used: [$jobs[] | {id, round}],
       gate_failures: [$jobs[] | .history[] | select(.why == "the gate failed")] | length,
       parks: [$jobs[] | .history[] | select(.why | startswith("parked"))] | length,
