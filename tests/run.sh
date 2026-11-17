@@ -96,13 +96,18 @@ check() { "$@" || fail "check failed: $*"; }
 not() { ! "$@" || fail "expected this to fail: $*"; }
 eq() { [[ $1 == "$2" ]] || fail "expected '$2', got '$1'${3:+ ($3)}"; }
 contains() { [[ $1 == *"$2"* ]] || fail "expected output to contain '$2'${3:+ ($3)}; got: $1"; }
-refused() { local out code; out="$("$@" 2>&1)"; code=$?; [[ $code == 2 ]] || fail "expected a refusal (exit 2) from: $* — got exit $code: $out"; }
+refused() { local out code=0; out="$("$@" 2>&1)" || code=$?; [[ $code == 2 ]] || fail "expected a refusal (exit 2) from: $* — got exit $code: $out"; }
 
 run_test() {
   local name=$1
   [[ -n ${FILTER:-} && $name != *"$FILTER"* ]] && return
   setup
-  if (set -e; "$name") >"$T.log" 2>&1; then
+  # Not `if (set -e; ...)`: Bash ignores set -e inside an if condition, so
+  # only a test's last command would count.
+  local rc=0
+  (set -e; "$name") >"$T.log" 2>&1
+  rc=$?
+  if ((rc == 0)); then
     PASS=$((PASS + 1)); echo "  ✓ ${name#test_}"
   else
     FAIL=$((FAIL + 1)); FAILED+=("$name"); echo "  ✗ ${name#test_}"; sed 's/^/      /' "$T.log" | tail -n 20
@@ -133,7 +138,7 @@ test_adopt_refuses_without_a_github_remote() {
   printf '#!/usr/bin/env bash\necho "no git remotes found" >&2; exit 1\n' >"$T/nogh/gh"
   chmod +x "$T/nogh/gh"
   local out
-  out="$(PATH="$T/nogh:$PATH" "$FJ" adopt 2>&1)"
+  out="$(PATH="$T/nogh:$PATH" "$FJ" adopt 2>&1)" && fail "adopt should fail without a GitHub remote"
   contains "$out" "needs a GitHub remote"
 }
 
@@ -251,7 +256,7 @@ test_single_job_end_to_end() {
   check test -d ".worktrees/$id"
   contains "$(fj plan)" "spawn agent=implementer job=$id round=1"
   fj start "$id" implementer >/dev/null
-  eq "$(fj plan)" "idle" "nothing new while the implementer runs"
+  eq "$(fj plan)" "" "nothing new, and not idle, while the implementer runs"
   implement "$id" 1
   fj advance "$id" implementer >/dev/null
   eq "$(stage "$id")" verify
