@@ -5,7 +5,9 @@
   "name": "agentic-software-factory",
   "image": "mcr.microsoft.com/devcontainers/base:ubuntu",
   "features": {
-    "ghcr.io/devcontainers/features/github-cli:1": {}
+    "ghcr.io/devcontainers/features/github-cli:1": {},
+    // Node for Playwright, which drives the board in a browser for e2e checks.
+    "ghcr.io/devcontainers/features/node:1": { "version": "lts" }
   },
   // A non-root user, as Claude Code's unattended modes require.
   "remoteUser": "vscode",
@@ -15,6 +17,14 @@
   "mounts": [
     "source=factory-claude-${devcontainerId},target=/home/vscode/.claude,type=volume"
   ],
+  // Let the Playwright MCP server start Chrome here: there's no display, and
+  // Chrome's own sandbox can't create namespaces in an unprivileged container
+  // (the container is the isolation). The server reads PLAYWRIGHT_MCP_SANDBOX;
+  // the PLAYWRIGHT_MCP_NO_SANDBOX in its README is ignored.
+  "containerEnv": {
+    "PLAYWRIGHT_MCP_HEADLESS": "true",
+    "PLAYWRIGHT_MCP_SANDBOX": "false"
+  },
   // Pass a GitHub token in from the host instead of storing one in the container.
   "remoteEnv": {
     "GH_TOKEN": "${localEnv:GH_TOKEN}"
