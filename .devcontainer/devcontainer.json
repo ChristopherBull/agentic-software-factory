@@ -3,19 +3,29 @@
   // Open with any tool that supports the Dev Containers spec, e.g. the
   // devcontainer CLI, DevPod, VS Code or Codespaces. See docs/INSTALL.md.
   "name": "agentic-software-factory",
-  "image": "mcr.microsoft.com/devcontainers/base:ubuntu",
+  "build": { "dockerfile": "Dockerfile" },
   "features": {
     "ghcr.io/devcontainers/features/github-cli:1": {},
     // Node for Playwright, which drives the board in a browser for e2e checks.
-    "ghcr.io/devcontainers/features/node:1": { "version": "lts" }
+    "ghcr.io/devcontainers/features/node:1": { "version": "lts" },
+    // Ubuntu's python3, for the board's localhost server; the board test
+    // skips without it. Not the feature's default linters.
+    "ghcr.io/devcontainers/features/python:1": {
+      "version": "os-provided",
+      "installTools": false
+    }
   },
   // A non-root user, as Claude Code's unattended modes require.
   "remoteUser": "vscode",
   "postCreateCommand": "bash .devcontainer/post-create.sh",
   // Keep Claude Code's login and settings across container rebuilds,
-  // without sharing the host's ~/.claude.
+  // without sharing the host's ~/.claude. The npm cache speeds up
+  // post-create's Playwright install and the Playwright MCP server's npx.
+  // Both are per container, not shared: anything the agent writes here
+  // survives a rebuild, so delete the volumes to reset fully.
   "mounts": [
-    "source=factory-claude-${devcontainerId},target=/home/vscode/.claude,type=volume"
+    "source=factory-claude-${devcontainerId},target=/home/vscode/.claude,type=volume",
+    "source=factory-npm-${devcontainerId},target=/home/vscode/.npm,type=volume"
   ],
   // Let the Playwright MCP server start Chrome here: there's no display, and
   // Chrome's own sandbox can't create namespaces in an unprivileged container
