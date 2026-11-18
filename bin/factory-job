@@ -90,7 +90,10 @@ validate_setting() { # validate_setting <key> <json-value>
       jq -e 'type == "number" and . >= 1 and floor == .' <<<"$val" >/dev/null || refuse "$key must be a whole number of at least 1" ;;
     statusline) jq -e '. == "on" or . == "off"' <<<"$val" >/dev/null || refuse "statusline must be on or off" ;;
     allow_host) jq -e 'type == "boolean"' <<<"$val" >/dev/null || refuse "allow_host must be true or false" ;;
-    protected_paths | routing | trusted_labellers) jq -e 'type == "array"' <<<"$val" >/dev/null || refuse "$key must be a JSON array" ;;
+    protected_paths)
+      jq -e 'type == "array" and all(.[]; type == "string" and . != "" and . != "!")' <<<"$val" >/dev/null ||
+        refuse "protected_paths must be a JSON array of globs (a leading ! excludes)" ;;
+    routing | trusted_labellers) jq -e 'type == "array"' <<<"$val" >/dev/null || refuse "$key must be a JSON array" ;;
     tiers.*.effort) jq -e 'IN("low","medium","high","xhigh","max")' <<<"$val" >/dev/null || refuse "effort must be low, medium, high, xhigh or max" ;;
   esac
   if [[ $key == routing ]]; then
@@ -114,6 +117,40 @@ config_set() { # config_set <key> <raw value>
   val="$(to_json_value "$2")"
   validate_setting "$key" "$val"
   write_json "$CONFIG" "$(jq --arg k "$key" --argjson v "$val" 'setpath($k | split("."); $v)' "$CONFIG")"
+}
+
+LIST_KEYS="protected_paths routing trusted_labellers"
+
+list_edit() { # list_edit <add|remove> <key> <item> <json>: prints the edited json
+  local op=$1 key=$2 item=$3 json=$4 val
+  grep -qw -- "$key" <<<"$LIST_KEYS" || refuse "$key isn't a list; use set"
+  val="$(jq -c --arg k "$key" 'getpath($k | split(".")) // []' <<<"$json")"
+  if [[ $op == add ]]; then
+    jq -e --arg i "$item" 'index($i) == null' <<<"$val" >/dev/null || refuse "$key already has $item"
+    val="$(jq -c --arg i "$item" '. + [$i]' <<<"$val")"
+  else
+    jq -e --arg i "$item" 'index($i) != null' <<<"$val" >/dev/null || refuse "$key has no $item"
+    val="$(jq -c --arg i "$item" 'map(select(. != $i))' <<<"$val")"
+  fi
+  validate_setting "$key" "$val"
+  jq --arg k "$key" --argjson v "$val" 'setpath($k | split("."); $v)' <<<"$json"
+}
+
+# A path is protected if it matches a glob and no !glob. Order doesn't matter
+# and an exclusion always wins, unlike .gitignore. `*` also matches `/`.
+path_protected() { # path_protected <path> <json array of globs>
+  local f=$1 pattern hit=1
+  while IFS= read -r pattern; do
+    [[ -z $pattern ]] && continue
+    if [[ $pattern == '!'* ]]; then
+      # shellcheck disable=SC2053 # the pattern is a glob on purpose
+      [[ $f == ${pattern#!} ]] && return 1
+    else
+      # shellcheck disable=SC2053
+      [[ $f == $pattern ]] && hit=0
+    fi
+  done < <(jq -r '.[]' <<<"$2")
+  return $hit
 }
 
 # ------------------------------------------------------------- safeguards ----
@@ -300,9 +337,10 @@ claim() { # claim <issue number> <how>: lock the issue, snapshot it, queue the j
   mkdir -p "$(job_dir "$id")"
   write_json "$(job_file "$id")" "$(jq -n --arg id "$id" --argjson n "$n" --arg title "$title" \
     --arg url "$(jq -r .url <<<"$json")" --arg now "$(now)" --arg how "$how" \
-    --argjson limit "$(cfg max_rounds 3)" '{
+    --argjson limit "$(cfg max_rounds 3)" --argjson protected "$(cfg protected_paths '[]')" '{
       id: $id, issue: $n, title: $title, url: $url, stage: "queued", how: $how,
-      round: 1, round_limit: $limit, conflict_retries: 0, branch: null, pr: null,
+      round: 1, round_limit: $limit, protected_paths: $protected,
+      conflict_retries: 0, branch: null, pr: null,
       pr_url: null, running: [], agents: {}, parked: null, created_at: $now,
       updated_at: $now, stage_since: $now,
       history: [{at: $now, from: null, to: "queued", why: ("claimed: " + $how)}]}')"
@@ -400,20 +438,23 @@ start_jobs() { # start queued jobs while slots are free
 }
 
 run_gate() { # run_gate <job>: writes round-N/gate.md, prints PASS or FAIL or PROTECTED
-  local id=$1 round wt out base changed pattern hit="" status=PASS file checks dirty
+  local id=$1 round wt out base changed f hit="" status=PASS file checks dirty now_paths claimed_paths
   round="$(jget "$id" round)"
   wt="$WORKTREES/$id"
   base="$(cfg base_branch main)"
   file="$(report_path "$id" gate "$round")"
   mkdir -p "$(dirname "$file")"
   changed="$(git -C "$wt" diff --name-only "origin/$base...HEAD" 2>/dev/null || git -C "$wt" diff --name-only "$base...HEAD")"
-  while IFS= read -r pattern; do
-    [[ -z $pattern ]] && continue
-    while IFS= read -r f; do
-      # shellcheck disable=SC2053 # the pattern is a glob on purpose
-      [[ -n $f && $f == $pattern ]] && hit+="$f "
-    done <<<"$changed"
-  done < <(jq -r '.[]' <<<"$(cfg protected_paths '[]')")
+  # The config is writable from a worktree, so judge against the list as it
+  # was at claim as well as now: loosening it mid-job doesn't help that job.
+  now_paths="$(cfg protected_paths '[]')"
+  claimed_paths="$(jget "$id" protected_paths)"
+  while IFS= read -r f; do
+    [[ -z $f ]] && continue
+    if path_protected "$f" "$now_paths" || { [[ -n $claimed_paths ]] && path_protected "$f" "$claimed_paths"; }; then
+      hit+="$f "
+    fi
+  done <<<"$changed"
   checks="$(cfg checks)"
   # The checks run on the working tree but only commits are pushed, so a dirty
   # tree (including a file mode change) could pass checks the PR would fail.
@@ -771,13 +812,14 @@ detect_protected() {
   echo "$out"
 }
 
-adopt() { # adopt [--plan P] [--yes] [--set key=value ...]
-  local plan="" yes=0 sets=() arg
+adopt() { # adopt [--plan P] [--yes] [--set key=value ...] [--add|--remove key=item ...]
+  local plan="" yes=0 sets=() edits=() arg
   while (($#)); do
     case $1 in
       --plan) plan=$2; shift 2 ;;
       --yes) yes=1; shift ;;
       --set) sets+=("$2"); shift 2 ;;
+      --add | --remove) edits+=("${1#--}" "$2"); shift 2 ;;
       *) die "adopt: unknown option $1" ;;
     esac
   done
@@ -805,9 +847,17 @@ adopt() { # adopt [--plan P] [--yes] [--set key=value ...]
     validate_setting "$k" "$v"
     proposal="$(jq --arg k "$k" --argjson v "$v" 'setpath($k | split("."); $v)' <<<"$proposal")"
   done
+  local i
+  for ((i = 0; i < ${#edits[@]}; i += 2)); do
+    arg=${edits[i + 1]}
+    proposal="$(list_edit "${edits[i]}" "${arg%%=*}" "${arg#*=}" "$proposal")"
+  done
   if ((yes == 0)); then
     echo "PROPOSED SETTINGS (confirm, then rerun with --yes and any --set key=value changes):"
-    jq '{repo, base_branch, checks, protected_paths, conventions, max_parallel_jobs}' <<<"$proposal"
+    jq '{repo, base_branch, checks, conventions, max_parallel_jobs}' <<<"$proposal"
+    echo "PROTECTED PATHS (a job that changes one escalates; add with --add protected_paths=<glob>,"
+    echo "drop with --remove protected_paths=<glob>, exclude with --add 'protected_paths=!<glob>'):"
+    jq -r '.protected_paths[] | "  " + .' <<<"$proposal"
     [[ -z $checks ]] && warn "no checks command detected; set one with --set checks='<command>'"
     return 0
   fi
@@ -1124,7 +1174,8 @@ usage() {
   cat <<'EOF'
 factory-job — the factory's guard script (the only writer of factory state)
 
-Setup:     adopt [--plan P] [--yes] [--set key=value]   config get|set <key> [value]
+Setup:     adopt [--plan P] [--yes] [--set key=value] [--add|--remove key=item]
+           config get|set <key> [value]   config add|remove <list key> <item>
 Ingress:   new <text>   issue <number|search text>   queue   pull
 Pipeline:  plan   next   start <job> <agent>   advance <job> <agent>   gate <job>
            pr <job>   finish <job>   rework <job> <note>   cancel <job>   refresh
@@ -1148,6 +1199,13 @@ main() {
       case ${1:-} in
         get) cfg "${2:?key}" ;;
         set) lock; config_set "${2:?key}" "${3?value}"; write_board; echo "SET: $2" ;;
+        add | remove)
+          lock
+          local edited
+          edited="$(list_edit "$1" "${2:?key}" "${3:?item}" "$(cat "$CONFIG")")"
+          write_json "$CONFIG" "$edited"
+          if [[ $1 == add ]]; then echo "ADDED: $3 to $2"; else echo "REMOVED: $3 from $2"; fi
+          ;;
         *) jq . "$CONFIG" ;;
       esac
       ;;

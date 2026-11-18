@@ -133,7 +133,16 @@ it learned in earlier rounds instead of starting cold.
 The gate runs the checks as defined on the base branch, not the job branch, so
 a branch can't change the checks it's judged by. A change to a protected path
 (CI config, the checks command and the files it runs, as listed in
-`config.json`) fails the gate and escalates. Uncommitted changes in the
+`config.json`) fails the gate and escalates. A path is protected if it matches
+at least one glob in `protected_paths` and no glob starting with `!`: an
+exclusion always wins, whatever the order, and there is no re-including as in
+`.gitignore`. `*` also matches `/`, so `tests/*` covers every file under
+`tests/`. For example, `["tests/*", "!tests/*_test.sh"]` protects the test
+harness but lets jobs add and edit tests. Each job records the list as it was
+when the job was claimed, and the gate applies both that list and the current
+one. The config is writable from a worktree, so loosening it mid-job doesn't
+let that job through. This is detection, not isolation: an agent running as
+the same user could still edit both copies. Uncommitted changes in the
 worktree, including file mode changes, fail the gate before the checks run:
 only commits reach the PR, so the checks must judge exactly what's committed.
 
@@ -242,7 +251,7 @@ The first command run in a repo that hasn't been adopted yet starts
 
 - **Sole writer.** Only the guard script writes factory state and labels. The
   operator changes settings through it (`factory-job config set <key>
-  <value>`, `factory-job pause`), never by editing files. It holds a lock
+  <value>`, `config add` and `config remove` for lists, `factory-job pause`), never by editing files. It holds a lock
   while writing and rejects any transition not in its transition table.
 - **One factory per repo.** Run one factory against a given repo at a time.
   `factory:in-progress` marks a claimed issue, and the guard script never
@@ -263,7 +272,7 @@ defaults.
 | `repo` | The GitHub repo, `owner/name`. | Detected at adoption |
 | `base_branch` | Branch jobs start from and PRs target. | Detected at adoption |
 | `checks` | The gate's checks command. | Detected at adoption |
-| `protected_paths` | Globs a job may not change without escalating. | CI config, the checks' files and `.devcontainer/*`; when the factory works on itself, also its guard script and plugin manifests |
+| `protected_paths` | Globs a job may not change without escalating; a leading `!` excludes (see [Pipeline](#pipeline)). | CI config, the checks' files and `.devcontainer/*`; when the factory works on itself, also its guard script and plugin manifests |
 | `conventions` | Commit and PR conventions: `default` or `conventional`. | `default` |
 | `max_parallel_jobs` | Jobs active at once. | Proposed from the plan at adoption |
 | `merge_mode` | What happens after approval. Only `repo` for now. | `repo` |
@@ -279,7 +288,10 @@ defaults.
 | `allow_host` | Allow unattended runs outside a Dev Container. | `false` |
 | `audit.models_seen`, `audit.last_run` | Written by `audit apply`, never set by hand. | — |
 
-`factory-job config set` refuses unknown keys and invalid values.
+`factory-job config set` refuses unknown keys and invalid values. For the
+lists (`protected_paths`, `routing`, `trusted_labellers`), `factory-job config
+add <key> <item>` and `config remove <key> <item>` change one entry without
+retyping the rest.
 
 ## Parallel jobs
 
@@ -407,8 +419,11 @@ VERDICT: CHANGES
   none, they fall back to `CLAUDE.md`, then the README, contributing docs and
   CI config.
 - **Adoption.** On the first `/factory run` in a repo, the factory detects the
-  base branch, checks command, conventions and parallel limit, and asks the
-  operator to confirm them once. The guard script then writes `config.json`.
+  base branch, checks command, conventions, parallel limit and protected
+  paths, and asks the operator to confirm them once. Protected paths are
+  shown as their own list, and the operator can add globs, drop detected ones
+  or add `!` exclusions (`adopt --add protected_paths=<glob>`, `--remove …`).
+  The guard script then writes `config.json`.
 
 ## Delivery
 

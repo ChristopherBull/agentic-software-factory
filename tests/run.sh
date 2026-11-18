@@ -157,9 +157,9 @@ test_dogfooding_protects_the_guard_and_sandbox() {
 }
 
 test_plan_limits() {
-  fj adopt --plan pro | grep -q '"max_parallel_jobs": 2'
-  fj adopt --plan ultra | grep -q '"max_parallel_jobs": 4'
-  fj adopt | grep -q '"max_parallel_jobs": 2'
+  contains "$(fj adopt --plan pro)" '"max_parallel_jobs": 2'
+  contains "$(fj adopt --plan ultra)" '"max_parallel_jobs": 4'
+  contains "$(fj adopt)" '"max_parallel_jobs": 2'
 }
 
 test_config_set_validates() {
@@ -374,6 +374,64 @@ test_protected_paths_escalate() {
   fj advance "$id" implementer >/dev/null
   contains "$(fj gate "$id")" "GATE: PROTECTED"
   eq "$(stage "$id")" escalated
+}
+
+gate_after_changing() { # gate_after_changing <file>: a new job that changes <file>; prints the gate's verdict
+  seed_issue "Change $1" maint >/dev/null
+  fj pull >/dev/null
+  local id
+  id="$(job_for "$(($(state .next) - 1))")"
+  specify_ready "$id"
+  mkdir -p ".worktrees/$id/$(dirname "$1")"
+  implement "$id" 1 "$1" "changed"
+  fj advance "$id" implementer >/dev/null
+  fj gate "$id"
+}
+
+test_protected_path_exclusions_win() {
+  adopt
+  fj config set max_parallel_jobs 3 >/dev/null
+  fj config set protected_paths '["tests/*", "!tests/*_test.sh"]' >/dev/null
+  contains "$(gate_after_changing tests/greet_test.sh)" "GATE: PASS" "an excluded path"
+  contains "$(gate_after_changing tests/unit/deep_test.sh)" "GATE: PASS" "* crosses /"
+  contains "$(gate_after_changing tests/run.sh)" "GATE: PROTECTED" "a protected path"
+}
+
+test_loosening_protected_paths_mid_job_doesnt_help() {
+  adopt
+  seed_issue "Sneaky" maint >/dev/null
+  fj pull >/dev/null
+  local id
+  id="$(first_job)"
+  specify_ready "$id"
+  fj config add protected_paths '!.github/*' >/dev/null
+  implement "$id" 1 .github/workflows/ci.yml "name: pwned"
+  fj advance "$id" implementer >/dev/null
+  contains "$(fj gate "$id")" "GATE: PROTECTED"
+}
+
+test_config_add_and_remove_edit_lists() {
+  adopt
+  contains "$(fj config add protected_paths 'docs/api/*')" "ADDED"
+  contains "$(fj config get protected_paths)" '"docs/api/*"'
+  contains "$(fj config get protected_paths)" '".github/workflows/*"' "add keeps the rest"
+  refused fj config add protected_paths 'docs/api/*'
+  fj config remove protected_paths 'docs/api/*' >/dev/null
+  not grep -q 'docs/api' .git/factory/config.json
+  refused fj config remove protected_paths 'docs/api/*'
+  refused fj config add protected_paths '!'
+  refused fj config add max_rounds 4
+  refused fj config add routing reviewer-nope
+}
+
+test_adopt_lists_protected_paths_and_takes_edits() {
+  local out
+  out="$(fj adopt --add 'protected_paths=docs/*' --add 'protected_paths=!docs/notes/*')"
+  contains "$out" "PROTECTED PATHS"
+  contains "$out" "  .github/workflows/*"
+  contains "$out" "  !docs/notes/*"
+  fj adopt --yes --remove 'protected_paths=.github/workflows/*' --add 'protected_paths=docs/*' >/dev/null
+  eq "$(fj config get protected_paths)" '["docs/*"]'
 }
 
 test_needs_info_waits_for_a_trusted_answer() {

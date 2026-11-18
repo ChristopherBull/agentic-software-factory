@@ -37,9 +37,14 @@ issues when a search matches several.
 1. Run `factory-job status`. If it says the repo isn't adopted, **adopt it**:
    detect the billing plan (see the reference file), run
    `factory-job adopt --plan <plan>`, show the operator the proposed settings
-   in a short table, and ask them to confirm or change any. Then run
-   `factory-job adopt --plan <plan> --yes` with a `--set key=value` for each
-   change. This is the only routine question you ever ask.
+   in a short table, and ask them to confirm or change any. Show the
+   protected paths as a separate list: say that a job changing one escalates
+   to a person, and ask in the same question whether to add any, drop any, or
+   exclude any with a leading `!` (for example `!tests/*_test.sh`, so jobs can
+   still write tests). Then run `factory-job adopt --plan <plan> --yes` with a
+   `--set key=value` for each changed setting, and an
+   `--add protected_paths=<glob>` or `--remove protected_paths=<glob>` for each
+   path change. This is the only routine question you ever ask.
 2. Run `factory-job run-start --models <file>`, where the file lists the
    model ids currently available, one per line (see the reference file). Pass
    on any `WARNING:` lines to the operator once, briefly.
