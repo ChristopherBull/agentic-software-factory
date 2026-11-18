@@ -3,6 +3,20 @@
 # the Dockerfile instead, cached as image layers.
 set -euo pipefail
 
+# Claude Code, with Anthropic's native installer. Here, not in a feature or
+# the image, so it owns its install under ~/.local and can update itself.
+# In the background: it's a download, independent of the apt work below.
+claude_pid=""
+if ! command -v claude >/dev/null; then
+  curl -fsSL https://claude.ai/install.sh | bash &
+  claude_pid=$!
+fi
+
+# The base image deletes downloaded packages after every apt run; keep them in
+# the apt cache volume instead. Removed here rather than in the Dockerfile so
+# the features' layers don't keep theirs.
+sudo rm -f /etc/apt/apt.conf.d/docker-clean
+
 # Playwright and Google Chrome, to check the board in a real browser. The
 # Playwright MCP server defaults to the Chrome channel, not bundled Chromium.
 # Playwright needs Node, which the feature adds after the Dockerfile, so it's
@@ -11,16 +25,20 @@ set -euo pipefail
 if ! command -v playwright >/dev/null; then
   npm install -g --silent playwright@1.64.1
 fi
-# Chrome is a system package, not a Playwright download, so no volume can
-# cache it, and it stays out of the image on purpose: the agent drives it,
-# unsandboxed, at pages it chooses, so each new container gets the current
-# release rather than one frozen in a cached layer.
-playwright install --with-deps chrome >/dev/null
+# Chrome stays out of the image on purpose: the agent drives it, unsandboxed,
+# at pages it chooses, so each new container gets the current release rather
+# than one frozen in a cached layer. Through apt, from the repo the Dockerfile
+# adds, so the download is cached until Google ships a new one.
+# install-deps runs apt-get update before Playwright's own dependencies.
+playwright install-deps chrome >/dev/null
+sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends \
+  google-chrome-stable >/dev/null
+# Playwright's own ffmpeg, for video, which `playwright install chrome` used
+# to bring along.
+playwright install ffmpeg >/dev/null
 
-# Claude Code, with Anthropic's native installer. Here, not in a feature or
-# the image, so it owns its install under ~/.local and can update itself.
-if ! command -v claude >/dev/null; then
-  curl -fsSL https://claude.ai/install.sh | bash
+if [ -n "$claude_pid" ]; then
+  wait "$claude_pid"
 fi
 
 cat <<'MSG'
