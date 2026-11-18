@@ -55,7 +55,7 @@ once (see [Parallel jobs](#parallel-jobs)).
 | Stage | Done by | What happens |
 |---|---|---|
 | Claim | Guard script | Mechanical, no judgement: verify the label, lock the issue, snapshot it, create the job. |
-| Specify | Specifier (agent) | Judgement: decide whether the work can go ahead (`READY`, `NEEDS-INFO` or `REJECT`) and, if so, write the specification. |
+| Specify | Specifier (agent) | Judgement: decide whether the work can go ahead (`READY`, `NEEDS-INFO`, `REJECT`, or `ESCALATE` when the change needs a protected path) and, if so, write the specification. |
 | Implement | Implementer (agent) | Change the code in the job's worktree until the specification's acceptance criteria are met. |
 | Verify | Gate (guard script), then reviewers (agents, in parallel) | The gate runs the repo's checks; reviewers judge the diff against the specification. |
 | Deliver | Guard script and approver (agent) | Open the PR, decide `APPROVE` or `ESCALATE`, then hand over according to the [merge mode](#delivery). |
@@ -72,6 +72,7 @@ flowchart TD
         specifier(["specifier<br/>🤖 strong<br/>last to read issue.md"])
     end
     specifier -- NEEDS-INFO --> park["ask on issue<br/>factory:needs-info"]
+    specifier -- "ESCALATE (protected path)" --> human
     specifier -- REJECT --> release["comment and release"]
     specifier -- READY --> implementer
 
@@ -141,8 +142,18 @@ exclusion always wins, whatever the order, and there is no re-including as in
 harness but lets jobs add and edit tests. Each job records the list as it was
 when the job was claimed, and the gate applies both that list and the current
 one. The config is writable from a worktree, so loosening it mid-job doesn't
-let that job through. This is detection, not isolation: an agent running as
-the same user could still edit both copies. Uncommitted changes in the
+let that job through. The checks command is recorded at claim too, and if
+it has changed by the time the gate runs, the gate escalates the job instead
+of running either command. This is detection, not isolation: an agent
+running as the same user could still edit both copies. `rework` is a
+person's decision, so it updates the job's recorded checks and protected
+paths to the current config.
+
+The specifier reads the job's protected paths, so a change that needs one is
+caught before any implementation round: it writes the full specification
+with `VERDICT: ESCALATE` and the paths on a `PROTECTED:` line. The operator
+then either excludes those paths and reworks the job, or makes that part of
+the change themselves and reworks it. Uncommitted changes in the
 worktree, including file mode changes, fail the gate before the checks run:
 only commits reach the PR, so the checks must judge exactly what's committed.
 
@@ -184,7 +195,7 @@ Every job is a GitHub issue. Work enters in one of four ways.
 | `factory:not-candidate` | Triager | Assessed and left for a person; not re-triaged unless the label is removed. |
 | `factory:in-progress` | Guard script | Claimed by the factory. |
 | `factory:needs-info` | Specifier | Question asked on the issue; job parked. |
-| `factory:needs-human` | Approver, or a round limit | Escalated; needs a person. |
+| `factory:needs-human` | Specifier, gate, approver, or a round limit | Escalated; needs a person. |
 | `factory:approved` | Approver | Approved by the factory; the repo's own process takes over. |
 
 Agents never edit labels. An agent records its decision as its verdict, and
@@ -232,7 +243,11 @@ The first command run in a repo that hasn't been adopted yet starts
 - **The specifier is the boundary.** The specifier is the last agent to read
   the issue. It writes `specification.md` in its own words and has no push
   access. The implementer reads `specification.md` and the target repo, never
-  `issue.md`.
+  `issue.md`. Under Claude Code, a plugin `PreToolUse` hook
+  (`hooks/issue-guard.sh`) blocks every factory agent except the specifier
+  and triager from reading `issue.md`, by name, by a wildcard over a job
+  folder, or by a recursive search of the factory folder. It catches
+  accidental reads; it isn't a sandbox.
 
 ## State
 
@@ -358,7 +373,7 @@ The job id is the issue number and a slug of its title. Its worktree is
 
 | Report | Verdict values | Also carries |
 |---|---|---|
-| `specification.md` | `READY` / `NEEDS-INFO` / `REJECT` | `READY`: change type (for the branch name) and acceptance criteria. `NEEDS-INFO`: the question to post. `REJECT`: the reason. |
+| `specification.md` | `READY` / `NEEDS-INFO` / `REJECT` / `ESCALATE` | `READY`: change type (for the branch name) and acceptance criteria. `NEEDS-INFO`: the question to post. `REJECT`: the reason. `ESCALATE`: a full specification as for `READY`, plus `PROTECTED:`, the protected paths it needs. |
 | `implementation.md` | `DONE` / `BLOCKED` | What changed, and how each acceptance criterion was checked. `BLOCKED`: why. |
 | `round-N/*-review.md` | `PASS` / `CHANGES` | `CHANGES`: each requested change. `PASS`: any reservations. |
 | `approval.md` | `APPROVE` / `ESCALATE` | `ESCALATE`: each concern. |

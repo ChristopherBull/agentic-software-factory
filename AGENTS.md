@@ -24,6 +24,7 @@ skills/factory/        orchestrator skill (/factory)
   references/          harness-specific mechanics (claude-code.md)
 agents/                one prompt per role
 bin/                   guard scripts (Bash)
+hooks/                 Claude Code plugin hooks (Bash)
 board/                 live board page (static, self-contained)
 statusline/            harness statusline wiring
 tests/                 guard script tests (real git, fake gh)
@@ -70,7 +71,7 @@ the tests.
 ```
 tests/run.sh                 # all guard-script tests
 tests/run.sh <pattern>       # tests whose names contain <pattern>
-shellcheck bin/factory-job tests/run.sh tests/fake-gh/gh statusline/*.sh .devcontainer/*.sh
+shellcheck bin/factory-job tests/run.sh tests/fake-gh/gh statusline/*.sh .devcontainer/*.sh hooks/*.sh
 ```
 
 CI (`.github/workflows/ci.yml`) runs shellcheck, checks the plugin manifests

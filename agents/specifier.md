@@ -21,6 +21,10 @@ read the issue, and everything after you works from your specification.
   README and contributing docs) and the code the change concerns.
 - Any `round-*/` notes in the job folder, if this is a re-specification after
   a question was answered.
+- `protected_paths` in `job.json` in the job folder: globs a job may not
+  change without a person's say-so. A path is protected if it matches a glob
+  and no glob starting with `!`; `*` also matches `/`. The checks command and
+  the files it runs are usually among them.
 
 ## Decide
 
@@ -31,6 +35,11 @@ read the issue, and everything after you works from your specification.
   from the code or sensible defaults: decide, and record the decision.
 - `REJECT`: too large, too vague to ever specify, unsafe, or not a code
   change. Give the reason in a sentence or two.
+- `ESCALATE`: the change is otherwise `READY`, but meeting it means changing
+  a protected path. Write the full specification as for `READY`, so a person
+  can let it go ahead. Prefer a specification that avoids protected paths
+  when one meets the goal, for example adding a new test file instead of
+  editing a protected test runner.
 
 ## Write `specification.md` in the job folder
 
@@ -41,11 +50,18 @@ Line 1 and 2 exactly (use the job id and round you were given):
 VERDICT: READY
 ```
 
-For `READY`, the next line is the change type, one of `feat`, `fix`, `docs`,
+For `READY` and `ESCALATE`, the next line is the change type, one of `feat`, `fix`, `docs`,
 `refactor`, `test`, `perf`, `build`, `ci` or `chore`:
 
 ```
 TYPE: fix
+```
+
+For `ESCALATE`, the line after that names the protected paths the change
+needs, comma-separated:
+
+```
+PROTECTED: tests/run.sh
 ```
 
 Then, in your own words (never paste the issue):

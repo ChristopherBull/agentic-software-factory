@@ -337,9 +337,10 @@ claim() { # claim <issue number> <how>: lock the issue, snapshot it, queue the j
   mkdir -p "$(job_dir "$id")"
   write_json "$(job_file "$id")" "$(jq -n --arg id "$id" --argjson n "$n" --arg title "$title" \
     --arg url "$(jq -r .url <<<"$json")" --arg now "$(now)" --arg how "$how" \
-    --argjson limit "$(cfg max_rounds 3)" --argjson protected "$(cfg protected_paths '[]')" '{
+    --argjson limit "$(cfg max_rounds 3)" --argjson protected "$(cfg protected_paths '[]')" \
+    --arg checks "$(cfg checks)" '{
       id: $id, issue: $n, title: $title, url: $url, stage: "queued", how: $how,
-      round: 1, round_limit: $limit, protected_paths: $protected,
+      round: 1, round_limit: $limit, protected_paths: $protected, checks: $checks,
       conflict_retries: 0, branch: null, pr: null,
       pr_url: null, running: [], agents: {}, parked: null, created_at: $now,
       updated_at: $now, stage_since: $now,
@@ -437,7 +438,7 @@ start_jobs() { # start queued jobs while slots are free
   done
 }
 
-run_gate() { # run_gate <job>: writes round-N/gate.md, prints PASS or FAIL or PROTECTED
+run_gate() { # run_gate <job>: writes round-N/gate.md, prints PASS, FAIL, PROTECTED or CHANGED
   local id=$1 round wt out base changed f hit="" status=PASS file checks dirty now_paths claimed_paths
   round="$(jget "$id" round)"
   wt="$WORKTREES/$id"
@@ -462,6 +463,10 @@ run_gate() { # run_gate <job>: writes round-N/gate.md, prints PASS or FAIL or PR
   if [[ -n $hit ]]; then
     status=PROTECTED
     out="Changed protected paths: $hit"
+  elif jq -e --arg c "$checks" 'has("checks") and .checks != $c' "$(job_file "$id")" >/dev/null; then
+    # Same reasoning: a job must be judged by the checks it was claimed under.
+    status=CHANGED
+    out="$(printf 'The checks command changed after this job was claimed.\nWas: %s\nNow: %s' "$(jget "$id" checks)" "$checks")"
   elif [[ -n $dirty ]]; then
     status=FAIL
     out="$(printf 'The worktree has uncommitted changes. Commit or discard them; only commits reach the PR.\n%s' "$dirty")"
@@ -499,6 +504,11 @@ after_gate() { # after_gate <job> <status>
       jset "$id" '.agents = {gate: "fail"}'
       echo "GATE: PROTECTED"
       escalate "$id" "The change touches protected paths (see round-$(jget "$id" round)/gate.md)."
+      ;;
+    CHANGED)
+      jset "$id" '.agents = {gate: "fail"}'
+      echo "GATE: CHANGED"
+      escalate "$id" "The checks command changed after this job was claimed. If you changed it, rework the job to accept the new command."
       ;;
   esac
 }
@@ -613,7 +623,14 @@ advance() { # advance <job> <agent>: validate the agent's report and move on
           gh issue edit "$(jget "$id" issue)" --remove-label factory:in-progress >/dev/null
           move_to "$id" rejected "the specifier rejected it"
           ;;
-        *) refuse "specification.md verdict must be READY, NEEDS-INFO or REJECT" ;;
+        ESCALATE)
+          # A full specification that needs protected paths: a person decides
+          # before any implementation round is spent on it.
+          [[ -n $(field "$f" TYPE) ]] || refuse "specification.md is ESCALATE but has no TYPE: line"
+          [[ -n $(field "$f" PROTECTED) ]] || refuse "specification.md is ESCALATE but has no PROTECTED: line"
+          escalate "$id" "The specification needs changes to protected paths: $(field "$f" PROTECTED). To let the factory make them, exclude those paths (factory-job config add protected_paths '!<path>') and rework the job; or make that part of the change yourself, then rework it."
+          ;;
+        *) refuse "specification.md verdict must be READY, NEEDS-INFO, REJECT or ESCALATE" ;;
       esac
       ;;
     implementer)
@@ -958,8 +975,10 @@ rework() { # rework <job> <note>
   printf '# Operator note\n\n%s\n' "$*" >"$(job_dir "$id")/round-$((round + 1))/rework.md"
   gh issue edit "$(jget "$id" issue)" --remove-label factory:needs-human >/dev/null 2>&1 || true
   [[ -n $(jget "$id" pr) ]] && { gh pr edit "$(jget "$id" pr)" --remove-label factory:needs-human >/dev/null 2>&1 || true; }
-  jset "$id" '.round += 1 | .round_limit = (.round + $m) | .agents = {implementer: "pending"} | .escalation = null' \
-    --argjson m "$(cfg max_rounds 3)"
+  # A person has looked, so the job is judged by the config as it is now.
+  jset "$id" '.round += 1 | .round_limit = (.round + $m) | .agents = {implementer: "pending"} | .escalation = null
+    | .checks = $c | .protected_paths = $p' \
+    --argjson m "$(cfg max_rounds 3)" --arg c "$(cfg checks)" --argjson p "$(cfg protected_paths '[]')"
   move_to "$id" implement "reworked by the operator"
   write_board
 }

@@ -31,12 +31,13 @@ jobs:
           python3 --version
 
       - name: Lint shell scripts
-        run: shellcheck bin/factory-job tests/run.sh tests/fake-gh/gh statusline/*.sh .devcontainer/*.sh
+        run: shellcheck bin/factory-job tests/run.sh tests/fake-gh/gh statusline/*.sh .devcontainer/*.sh hooks/*.sh
 
       - name: Check plugin manifests
         run: |
           jq -e '.name == "factory" and (.version | type == "string")' .claude-plugin/plugin.json
           jq -e '.name and .owner.name and (.plugins | any(.name == "factory" and .source == "./"))' .claude-plugin/marketplace.json
+          jq -e '.hooks.PreToolUse | length > 0' hooks/hooks.json
           for f in agents/*.md skills/factory/SKILL.md; do
             head -n1 "$f" | grep -qx -- '---' || { echo "::error file=$f::missing frontmatter"; exit 1; }
           done

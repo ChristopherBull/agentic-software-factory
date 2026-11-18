@@ -410,6 +410,71 @@ test_loosening_protected_paths_mid_job_doesnt_help() {
   contains "$(fj gate "$id")" "GATE: PROTECTED"
 }
 
+test_changing_checks_mid_job_escalates_until_reworked() {
+  adopt
+  seed_issue "Loosen" maint >/dev/null
+  fj pull >/dev/null
+  local id
+  id="$(first_job)"
+  specify_ready "$id"
+  fj config set checks true >/dev/null
+  implement "$id" 1
+  fj advance "$id" implementer >/dev/null
+  contains "$(fj gate "$id")" "GATE: CHANGED"
+  eq "$(stage "$id")" escalated
+  check grep -q "Was: test -f app.txt" ".git/factory/jobs/$id/round-1/gate.md"
+  fj rework "$id" "the new checks are fine" >/dev/null
+  fj start "$id" implementer >/dev/null
+  report "$id" implementer 2 DONE "TITLE: fix: handle the thing"
+  fj advance "$id" implementer >/dev/null
+  contains "$(fj gate "$id")" "GATE: PASS" "rework accepts the current checks"
+}
+
+test_specifier_escalates_a_protected_change() {
+  adopt
+  seed_issue "Edit the runner" maint >/dev/null
+  fj pull >/dev/null
+  local id
+  id="$(first_job)"
+  check jq -e '.protected_paths | index(".github/workflows/*")' ".git/factory/jobs/$id/job.json" >/dev/null
+  fj start "$id" specifier >/dev/null
+  report "$id" specifier 1 ESCALATE "TYPE: ci" "" "Acceptance: the workflow runs on tags."
+  refused fj advance "$id" specifier
+  report "$id" specifier 1 ESCALATE "TYPE: ci" "PROTECTED: .github/workflows/ci.yml" "" "Acceptance: the workflow runs on tags."
+  fj advance "$id" specifier >/dev/null
+  eq "$(stage "$id")" escalated
+  contains "$(job "$id" .escalation)" ".github/workflows/ci.yml"
+  eq "$(state '.issues["1"].labels | index("factory:needs-human") != null')" true
+  check test ! -d ".worktrees/$id"
+  fj config add protected_paths '!.github/workflows/ci.yml' >/dev/null
+  fj rework "$id" "go ahead with the workflow change" >/dev/null
+  eq "$(stage "$id")" implement
+  implement "$id" 2 .github/workflows/ci.yml "on: push"
+  fj advance "$id" implementer >/dev/null
+  contains "$(fj gate "$id")" "GATE: PASS" "the operator excluded the path"
+}
+
+hook() { # hook <agent_type> <tool> <tool_input json>: exit code of the issue guard
+  local code=0
+  jq -n --arg a "$1" --arg t "$2" --argjson i "$3" --arg cwd "$T/repo/.worktrees/1-x" \
+    '{agent_type: $a, tool_name: $t, tool_input: $i, cwd: $cwd}' |
+    "$ROOT/hooks/issue-guard.sh" 2>/dev/null || code=$?
+  echo "$code"
+}
+
+test_hook_keeps_downstream_agents_off_the_issue() {
+  local j="$T/repo/.git/factory/jobs/1-x"
+  eq "$(hook factory:implementer Read "{\"file_path\": \"$j/issue.md\"}")" 2 "implementer reads the issue"
+  eq "$(hook factory:reviewer-code Bash "{\"command\": \"cat $j/*\"}")" 2 "wildcard over the job folder"
+  eq "$(hook factory:approver Bash "{\"command\": \"grep -rn token $T/repo/.git/factory\"}")" 2 "recursive grep"
+  eq "$(hook factory:reviewer-security Grep "{\"pattern\": \"x\", \"path\": \"$j\"}")" 2 "grep over the job folder"
+  eq "$(hook factory:specifier Read "{\"file_path\": \"$j/issue.md\"}")" 0 "the specifier may"
+  eq "$(hook "" Read "{\"file_path\": \"$j/issue.md\"}")" 0 "the orchestrator isn't an agent"
+  eq "$(hook factory:implementer Read "{\"file_path\": \"$j/specification.md\"}")" 0 "the spec is fine"
+  eq "$(hook factory:implementer Grep "{\"pattern\": \"issue.md\", \"path\": \"agents\"}")" 0 "dogfooding: code that mentions issue.md"
+  eq "$(hook factory:reviewer-code Grep "{\"pattern\": \"x\", \"path\": \"$j/specification.md\"}")" 0 "grep one report"
+}
+
 test_config_add_and_remove_edit_lists() {
   adopt
   contains "$(fj config add protected_paths 'docs/api/*')" "ADDED"

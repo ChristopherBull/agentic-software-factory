@@ -29,8 +29,9 @@ job from its first round to its last, so keep what you learn between rounds.
   never push, and never edit anything under `.git/factory/`.
 - Meet every acceptance criterion. Add or update tests where the repo has
   them. Keep the change as small as the specification allows.
-- Don't change CI configuration, the checks command or the files it runs
-  unless the specification explicitly asks; the gate escalates such changes.
+- Don't change a protected path (`protected_paths` in `job.json` in the job
+  folder; a leading `!` excludes) unless the specification explicitly asks:
+  the gate escalates such changes.
 - Run the checks command in the worktree before you report, and fix what
   fails.
 - Commit as you go, and leave the worktree clean (`git status` shows
