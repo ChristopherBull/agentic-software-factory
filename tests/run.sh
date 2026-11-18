@@ -577,6 +577,7 @@ test_board_data_escapes_nothing_into_html() {
   seed_issue '<img src=x onerror=alert(1)>' maint >/dev/null
   fj pull >/dev/null
   check test -f .git/factory/board/index.html
+  check test -f .git/factory/board/favicon.svg
   local data
   data="$(sed -e 's/^window.FACTORY_BOARD = //' -e 's/;$//' .git/factory/board/data.js)"
   eq "$(jq -r '.jobs[0].title' <<<"$data")" '<img src=x onerror=alert(1)>'

@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <style>
+    path { fill: #374151; }
+    @media (prefers-color-scheme: dark) { path { fill: #e5e7eb; } }
+  </style>
+  <!-- Chimney, then the sawtooth-roofed hall with windows cut out. -->
+  <path d="M4 5h3v12H4z"/>
+  <path fill-rule="evenodd" d="M2 30V17l7-6v6l7-6v6l7-6v6l7-6v19z M6 21h4v4H6z M14 21h4v4h-4z M22 21h4v4h-4z"/>
+</svg>

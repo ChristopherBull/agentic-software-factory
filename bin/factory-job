@@ -1016,9 +1016,11 @@ write_board() { # rewrite board/data.js; never fails the caller
   adopted || return 0
   {
     mkdir -p "$BOARD_DIR"
-    [[ -f $BOARD_DIR/index.html && $BOARD_DIR/index.html -nt $PLUGIN_ROOT/board/index.html ]] ||
-      cp "$PLUGIN_ROOT/board/index.html" "$BOARD_DIR/index.html"
     local jobs_json='[]' id dir f reports
+    for f in index.html favicon.svg; do
+      [[ -f $BOARD_DIR/$f && $BOARD_DIR/$f -nt $PLUGIN_ROOT/board/$f ]] ||
+        cp "$PLUGIN_ROOT/board/$f" "$BOARD_DIR/$f"
+    done
     for id in $(all_jobs); do
       dir="$(job_dir "$id")"
       reports='[]'
