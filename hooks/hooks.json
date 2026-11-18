@@ -1,0 +1,13 @@
+{
+  "description": "Keeps factory agents after the specifier from reading the untrusted issue snapshot.",
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Read|Grep|Bash",
+        "hooks": [
+          { "type": "command", "command": "${CLAUDE_PLUGIN_ROOT}/hooks/issue-guard.sh", "timeout": 10 }
+        ]
+      }
+    ]
+  }
+}
